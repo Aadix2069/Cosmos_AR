@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>COSMOS — Solar System Explorer</title>
+
+    <link
+        rel="stylesheet"
+        href="./css/style.css"
+    >
+</head>
+
+<body>
+
+    <div id="loading-screen">
+        <div class="loader-content">
+            <div class="loader-orbit">
+                <div class="loader-planet"></div>
+            </div>
+
+            <h1>COSMOS</h1>
+            <p id="loading-status">Loading Solar System...</p>
+        </div>
+    </div>
+
+
+    <div id="scene-ui">
+
+        <div class="brand">
+            <span class="brand-title">COSMOS</span>
+            <span class="brand-subtitle">SOLAR SYSTEM EXPLORER</span>
+        </div>
+
+        <div class="instructions">
+            <span>🖱 Drag to look around</span>
+            <span>Scroll to zoom</span>
+        </div>
+
+    </div>
+
+
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/"
+        }
+    }
+    </script>
+
+    <script
+        type="module"
+        src="./js/main.js"
+    ></script>
+
+</body>
+
+</html>
