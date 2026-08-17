@@ -1,41 +1,48 @@
 import * as THREE from "three";
 
-export const blackHoleVertexShader = `
-varying vec3 vWorldPosition;
+// ============================================================
+// VERTEX SHADERS
+// ============================================================
+
+export const accretionDiskVertexShader = `
+attribute float aRadius;
+attribute float aAngle;
+attribute float aHeight;
+
+uniform float uTime;
+uniform float uDiskRadius;
+
+varying float vRadius;
+varying float vAngle;
+varying float vHeight;
 
 void main() {
-    vec4 worldPosition = modelMatrix * vec4(position, 1.0);
-    vWorldPosition = worldPosition.xyz;
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    vRadius = aRadius;
+    vAngle = aAngle;
+    vHeight = aHeight;
+    
+    // Disk rotation
+    float rotatedAngle = aAngle + uTime * 0.08;
+    
+    // Parametric disk position
+    float x = aRadius * cos(rotatedAngle);
+    float z = aRadius * sin(rotatedAngle);
+    float y = aHeight;
+    
+    vec4 modelPosition = vec4(x, y, z, 1.0);
+    gl_Position = projectionMatrix * modelViewMatrix * modelPosition;
 }
 `;
 
-export const blackHoleFragmentShader = `
+export const accretionDiskFragmentShader = `
 uniform float uTime;
-uniform vec3 uCenter;
-uniform float uHorizonRadius;
-uniform float uPhotonRadius;
-uniform float uInnerRadius;
-uniform float uOuterRadius;
-uniform float uInfluenceRadius;
-uniform float uStepSize;
-uniform float uBendStrength;
-uniform float uDiskSpin;
-uniform float uDiskBrightness;
-uniform float uDiskThickness;
-uniform float uPhotonBrightness;
-uniform float uDoppler;
-uniform float uGlowIntensity;
-uniform float uSpikeStrength;
-uniform float uAuraRadius;
-uniform vec3 uInnerColor;
-uniform vec3 uOuterColor;
-uniform float uPass;
+uniform float uDiskRadius;
 
-varying vec3 vWorldPosition;
+varying float vRadius;
+varying float vAngle;
+varying float vHeight;
 
-const int MAX_STEPS = 200;
-
+// Noise functions
 float hash21(vec2 p) {
     p = fract(p * vec2(234.34, 435.345));
     p += dot(p, p + 34.23);
@@ -57,7 +64,7 @@ float fbm(vec2 p) {
     float v = 0.0;
     float a = 0.5;
     mat2 m = mat2(1.6, 1.2, -1.2, 1.6);
-    for (int i = 0; i < 5; i++) {
+    for (int i = 0; i < 4; i++) {
         v += a * vnoise(p);
         p = m * p;
         a *= 0.5;
@@ -65,293 +72,401 @@ float fbm(vec2 p) {
     return v;
 }
 
-vec3 diskColor(float r, float angle) {
-    float t = clamp((r - uInnerRadius) / (uOuterRadius - uInnerRadius), 0.0, 1.0);
-    float heat = 1.0 - t;
-
-    float omega = uTime * uDiskSpin * pow(uInnerRadius / r, 1.5);
-    float a = angle + omega;
-
-    vec2 q = vec2(cos(a), sin(a)) * r;
-
-    float f1 = fbm(q * 0.55);
-    float f2 = fbm(q * 1.7 + 7.13);
-    float f3 = fbm(q * 5.1 + 13.7);
-
-    float bands = 0.55 + 0.45 * sin(t * 40.0 + f2 * 7.0);
-    float dust = 0.55 + 0.75 * f3;
-
-    vec3 col = mix(uOuterColor, vec3(1.0, 0.47, 0.0), smoothstep(0.0, 0.35, heat));
-    col = mix(col, vec3(1.0, 0.85, 0.35), smoothstep(0.3, 0.65, heat));
-    col = mix(col, uInnerColor, smoothstep(0.6, 0.95, heat));
-
-    float bright = pow(heat, 1.4);
-
-    float rim = exp(-pow(t * 16.0, 2.0));
-    col = mix(col, uInnerColor, min(rim * 1.2, 1.0));
-
-    float edgeIn = smoothstep(uInnerRadius, uInnerRadius * 1.15, r);
-    float edgeOut = 1.0 - smoothstep(uOuterRadius * 0.82, uOuterRadius, r);
-    float falloff = edgeIn * edgeOut;
-
-    vec3 point = vec3(cos(angle) * r, uCenter.y, sin(angle) * r);
-    vec2 tangent = vec2(-sin(angle), cos(angle));
-    vec3 toCam = normalize(cameraPosition - point);
-    float approach = dot(vec3(tangent.x, 0.0, tangent.y), toCam);
-    float doppler = 1.0 + uDoppler * approach;
-    col *= doppler;
-    col += uInnerColor * max(approach, 0.0) * uDoppler * 0.5;
-
-    float intensity = (bright * 0.85 + rim * 4.0) * (0.7 + 0.5 * f1) * (0.5 + 0.6 * bands) * (0.5 + 0.6 * dust) * falloff;
-    return col * intensity * uDiskBrightness;
-}
-
 void main() {
-    vec3 ro = cameraPosition;
-    vec3 rd = normalize(vWorldPosition - cameraPosition);
-    vec3 center = uCenter;
-
-    vec3 oc = center - ro;
-    float b = dot(rd, oc);
-    float c = dot(oc, oc) - uInfluenceRadius * uInfluenceRadius;
-    float disc = b * b - c;
-
-    float periapsis = length(cross(oc, rd));
-
-    vec3 col = vec3(0.0);
-    float alpha = 0.0;
-
-    float ringBoost = 0.0;
-    float ringMix = 0.0;
-    float glow = 0.0;
-    bool hitHole = false;
-    bool diskHit = false;
-    vec3 diskCol = vec3(0.0);
-
-    if (disc > 0.0) {
-        float tEnter = max(0.0, b - sqrt(disc));
-        vec3 p = ro + rd * tEnter;
-        vec3 dir = rd;
-        float minDist = 1e20;
-
-        for (int i = 0; i < MAX_STEPS; i++) {
-            float d = length(p - center);
-            minDist = min(minDist, d);
-
-            if (d < uHorizonRadius) {
-                hitHole = true;
-                break;
-            }
-
-            if (d < uInfluenceRadius) {
-                vec3 g = (center - p) / d;
-                float w = uHorizonRadius / d;
-                float defl = min(w * w * uStepSize * uBendStrength, 0.6);
-                dir = normalize(dir + g * defl);
-            }
-
-            float h = abs(p.y - center.y);
-            float rr2 = length(p.xz - center.xz);
-            if (rr2 > uInnerRadius * 0.9 && rr2 < uOuterRadius * 1.15 && h < uDiskThickness * 6.0) {
-                glow += exp(-h / uDiskThickness) * uStepSize;
-            }
-
-            if (uPass < 0.5) {
-                float prevH = p.y - center.y;
-                vec3 pn = p + dir * uStepSize;
-                float nextH = pn.y - center.y;
-
-                if (prevH * nextH <= 0.0 && abs(prevH - nextH) > 1e-6) {
-                    float f = clamp(prevH / (prevH - nextH), 0.0, 1.0);
-                    vec3 xp = p + dir * (uStepSize * f);
-                    float rr = length(xp.xz - center.xz);
-                    if (rr > uInnerRadius * 0.9 && rr < uOuterRadius * 1.15) {
-                        float ang = atan(xp.z - center.z, xp.x - center.x);
-                        diskCol = diskColor(rr, ang);
-                        diskHit = true;
-                        break;
-                    }
-                }
-                p = pn;
-            } else {
-                p += dir * uStepSize;
-            }
-
-            if (length(p - center) > uInfluenceRadius) {
-                break;
-            }
-        }
-
-        if (!hitHole) {
-            float gd = (minDist - uPhotonRadius) / (uPhotonRadius * 0.35);
-            ringBoost = exp(-gd * gd) * uPhotonBrightness;
-            ringMix = smoothstep(uPhotonRadius, uPhotonRadius * 2.2, minDist);
-        }
-    }
-
-    if (uPass < 0.5) {
-        vec3 glowColor = vec3(1.0, 0.55, 0.2);
-        if (hitHole) {
-            col = vec3(0.0);
-            alpha = 1.0;
-        } else if (diskHit) {
-            col = diskCol + glow * glowColor * uDiskBrightness * 0.25;
-            alpha = 1.0;
-        } else if (glow > 0.001) {
-            col = glow * glowColor * uDiskBrightness * 0.25;
-            alpha = 1.0;
-        } else {
-            alpha = 0.0;
-        }
+    // Normalized radius
+    float t = vRadius / uDiskRadius;
+    t = clamp(t, 0.0, 1.0);
+    
+    // Heat gradient (inner = hotter)
+    float heat = 1.0 - t;
+    
+    // Procedural noise
+    vec2 noiseCoord = vec2(vAngle, uTime * 0.03) * 2.5;
+    float n1 = fbm(noiseCoord + vRadius * 0.4);
+    float n2 = fbm(noiseCoord * 1.8 + vRadius + uTime * 0.08);
+    float turbulence = mix(n1, n2, 0.5);
+    
+    // Radial bands
+    float bands = 0.6 + 0.4 * sin(t * 25.0 + turbulence * 4.0);
+    
+    // Color temperature gradient
+    vec3 color = vec3(0.0);
+    
+    if (heat > 0.85) {
+        // Inner: white-hot
+        color = mix(vec3(1.0, 0.95, 0.85), vec3(1.0, 1.0, 1.0), (heat - 0.85) * 6.67);
+    } else if (heat > 0.65) {
+        // Inner-mid: yellow
+        color = mix(vec3(1.0, 0.8, 0.3), vec3(1.0, 0.95, 0.85), (heat - 0.65) * 5.0);
+    } else if (heat > 0.45) {
+        // Mid: orange
+        color = mix(vec3(1.0, 0.5, 0.1), vec3(1.0, 0.8, 0.3), (heat - 0.45) * 5.0);
+    } else if (heat > 0.25) {
+        // Outer-mid: red-orange
+        color = mix(vec3(0.7, 0.15, 0.05), vec3(1.0, 0.5, 0.1), (heat - 0.25) * 5.0);
     } else {
-        if (!hitHole) {
-            vec3 ringCol = mix(uInnerColor, uOuterColor, ringMix) * ringBoost;
-
-            vec3 diskGlowCol = vec3(1.0, 0.5, 0.15) * glow * uDiskBrightness * 0.35;
-
-            float shadowMask = smoothstep(uPhotonRadius * 1.02, uPhotonRadius * 1.5, periapsis);
-            float aura = exp(-pow((periapsis - uHorizonRadius) / uAuraRadius, 2.0));
-            vec3 auraCol = mix(uOuterColor, uInnerColor, smoothstep(uPhotonRadius, uPhotonRadius * 2.5, periapsis));
-            auraCol *= aura * shadowMask * 0.8;
-
-            float spike = 0.0;
-            if (periapsis < uAuraRadius * 1.5) {
-                vec3 holeDir = normalize(center - ro);
-                vec3 right = normalize(cross(holeDir, vec3(0.0, 1.0, 0.0)) + 1e-6);
-                vec3 up = normalize(cross(right, holeDir));
-                float ang = max(acos(clamp(dot(holeDir, rd), -1.0, 1.0)), 1e-4);
-                vec2 off = vec2(dot(rd, right), dot(rd, up)) / ang;
-                spike = pow(max(0.0, 1.0 - abs(off.x)), 6.0) * pow(max(0.0, 1.0 - abs(off.y)), 6.0);
-            }
-
-            col = (ringCol + diskGlowCol + auraCol) * uGlowIntensity;
-            col += uInnerColor * spike * aura * uSpikeStrength * uGlowIntensity;
-
-            alpha = 1.0;
-            if (max(col.r, max(col.g, col.b)) <= 0.001) {
-                alpha = 0.0;
-            }
-        } else {
-            alpha = 0.0;
-        }
+        // Outer: dark red
+        color = mix(vec3(0.2, 0.02, 0.0), vec3(0.7, 0.15, 0.05), heat * 4.0);
     }
-
-    if (alpha <= 0.001) {
-        discard;
-    }
-
-    gl_FragColor = vec4(col, 1.0);
-    #include <tonemapping_fragment>
-    #include <colorspace_fragment>
+    
+    // Apply variation
+    color *= (0.7 + 0.3 * turbulence) * bands;
+    
+    // Doppler asymmetry
+    float dopplerEffect = 1.0 + 0.25 * sin(vAngle);
+    color *= dopplerEffect;
+    
+    // Intensity with Fresnel
+    float fresnel = 1.0 - abs(vHeight) * 2.0;
+    fresnel = max(0.0, fresnel);
+    
+    float intensity = heat * fresnel * (0.8 + 0.2 * turbulence) * 2.2;
+    
+    // Edge falloff
+    float edgeFalloff = smoothstep(uDiskRadius * 0.95, uDiskRadius * 1.05, vRadius);
+    intensity *= (1.0 - edgeFalloff * 0.5);
+    
+    gl_FragColor = vec4(color * intensity, intensity * 0.8);
 }
 `;
 
+// Lensed disk shader
+export const lensedDiskVertexShader = `
+attribute float aRadius;
+attribute float aAngle;
+
+uniform float uTime;
+uniform float uDiskRadius;
+uniform float uLensingStrength;
+
+varying float vRadius;
+varying float vAngle;
+
+void main() {
+    vRadius = aRadius;
+    vAngle = aAngle;
+    
+    float rotatedAngle = aAngle + uTime * 0.08;
+    
+    float x = aRadius * cos(rotatedAngle);
+    float z = aRadius * sin(rotatedAngle);
+    
+    // Strong upward curvature
+    float t = (aRadius - uDiskRadius * 0.3) / (uDiskRadius * 0.6);
+    t = clamp(t, 0.0, 1.0);
+    
+    float curvature = uLensingStrength * (1.0 - t * t);
+    float y = curvature * 1.2;
+    
+    vec4 modelPosition = vec4(x, y, z, 1.0);
+    gl_Position = projectionMatrix * modelViewMatrix * modelPosition;
+}
+`;
+
+export const lensedDiskFragmentShader = `
+uniform float uTime;
+uniform float uDiskRadius;
+
+varying float vRadius;
+varying float vAngle;
+
+float hash21(vec2 p) {
+    p = fract(p * vec2(234.34, 435.345));
+    p += dot(p, p + 34.23);
+    return fract(p.x * p.y);
+}
+
+float vnoise(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    return mix(
+        mix(hash21(i), hash21(i + vec2(1.0, 0.0)), f.x),
+        mix(hash21(i + vec2(0.0, 1.0)), hash21(i + vec2(1.0, 1.0)), f.x),
+        f.y
+    );
+}
+
+void main() {
+    float t = vRadius / (uDiskRadius * 0.9);
+    t = clamp(t, 0.0, 1.0);
+    
+    // Noise
+    float n = vnoise(vec2(vAngle + uTime * 0.04, vRadius * 1.5));
+    
+    // Bright lensed image
+    vec3 baseColor = mix(
+        vec3(1.0, 0.8, 0.3),
+        vec3(1.0, 1.0, 0.95),
+        t
+    );
+    
+    // Intensity brighter in middle
+    float intensity = (1.0 - t * t * 0.5) * (0.75 + 0.25 * n) * 1.8;
+    
+    gl_FragColor = vec4(baseColor * intensity, intensity * 0.6);
+}
+`;
+
+// ============================================================
+// CONFIGURATION
+// ============================================================
+
 export const DEFAULT_GARGANTUA_CONFIG = {
-    blackHoleDistance: 300,
-    blackHoleScale: 6,
-    direction: new THREE.Vector3(-0.7, 0.12, -0.75).normalize(),
-    domeRadius: 2000,
-    horizonRadius: 6,
-    photonRadius: 9,
-    innerRadius: 14.4,
-    outerRadius: 31.2,
-    influenceRadius: 48,
-    stepSize: 0.9,
-    bendStrength: 1.2,
-    diskSpin: 0.22,
-    diskBrightness: 1.7,
-    diskThickness: 0.5,
-    photonBrightness: 5.0,
-    doppler: 0.55,
-    glowIntensity: 1.25,
-    spikeStrength: 0.5,
-    auraRadius: 18,
-    innerColor: new THREE.Color(1.0, 1.0, 1.0),
-    outerColor: new THREE.Color(1.0, 0.133, 0.0)
+    position: new THREE.Vector3(0, 0, 0),
+    horizonRadius: 1.2,
+    diskRadius: 5.5,
+    diskThickness: 0.07,
+    lensingStrength: 1.8
 };
+
+// ============================================================
+// GEOMETRY CREATION
+// ============================================================
+
+function createAccretionDiskGeometry(diskRadius, thickness, radialSegs, angularSegs) {
+    const geometry = new THREE.BufferGeometry();
+    
+    const positions = [];
+    const radiusAttr = [];
+    const angleAttr = [];
+    const heightAttr = [];
+    const indices = [];
+    
+    const innerRadius = diskRadius * 0.15;
+    const outerRadius = diskRadius;
+    
+    for (let i = 0; i <= radialSegs; i++) {
+        const r = innerRadius + (outerRadius - innerRadius) * (i / radialSegs);
+        
+        for (let j = 0; j <= angularSegs; j++) {
+            const angle = (j / angularSegs) * Math.PI * 2;
+            
+            // Two layers for thickness
+            for (let layer = 0; layer < 2; layer++) {
+                const x = r * Math.cos(angle);
+                const z = r * Math.sin(angle);
+                const y = (layer === 0 ? -1 : 1) * thickness * 0.5;
+                
+                positions.push(x, y, z);
+                radiusAttr.push(r);
+                angleAttr.push(angle);
+                heightAttr.push(y / thickness);
+            }
+        }
+    }
+    
+    // Indices
+    const verticesPerRing = (angularSegs + 1) * 2;
+    
+    for (let i = 0; i < radialSegs; i++) {
+        for (let j = 0; j < angularSegs; j++) {
+            const base = i * verticesPerRing + j * 2;
+            
+            indices.push(base, base + 2, base + 1);
+            indices.push(base + 1, base + 2, base + 3);
+        }
+    }
+    
+    geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
+    geometry.setAttribute('aRadius', new THREE.BufferAttribute(new Float32Array(radiusAttr), 1));
+    geometry.setAttribute('aAngle', new THREE.BufferAttribute(new Float32Array(angleAttr), 1));
+    geometry.setAttribute('aHeight', new THREE.BufferAttribute(new Float32Array(heightAttr), 1));
+    geometry.setIndex(new THREE.BufferAttribute(new Uint32Array(indices), 1));
+    
+    geometry.computeVertexNormals();
+    
+    return geometry;
+}
+
+function createLensedDiskGeometry(diskRadius, radialSegs, angularSegs, isUpper) {
+    const geometry = new THREE.BufferGeometry();
+    
+    const positions = [];
+    const radiusAttr = [];
+    const angleAttr = [];
+    const indices = [];
+    
+    const innerRadius = diskRadius * 0.25;
+    const outerRadius = diskRadius * 0.95;
+    
+    for (let i = 0; i <= radialSegs; i++) {
+        const r = innerRadius + (outerRadius - innerRadius) * (i / radialSegs);
+        const t = (r - innerRadius) / (outerRadius - innerRadius);
+        
+        for (let j = 0; j <= angularSegs; j++) {
+            const angle = (j / angularSegs) * Math.PI * 2;
+            
+            const x = r * Math.cos(angle);
+            const z = r * Math.sin(angle);
+            
+            const curvature = isUpper ? 1 : -1;
+            const y = curvature * (1.0 - t * t) * diskRadius * 0.45;
+            
+            positions.push(x, y, z);
+            radiusAttr.push(r);
+            angleAttr.push(angle);
+        }
+    }
+    
+    // Indices
+    const verticesPerRing = angularSegs + 1;
+    
+    for (let i = 0; i < radialSegs; i++) {
+        for (let j = 0; j < angularSegs; j++) {
+            const base = i * verticesPerRing + j;
+            
+            indices.push(base, base + verticesPerRing + 1, base + 1);
+            indices.push(base, base + verticesPerRing, base + verticesPerRing + 1);
+        }
+    }
+    
+    geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
+    geometry.setAttribute('aRadius', new THREE.BufferAttribute(new Float32Array(radiusAttr), 1));
+    geometry.setAttribute('aAngle', new THREE.BufferAttribute(new Float32Array(angleAttr), 1));
+    geometry.setIndex(new THREE.BufferAttribute(new Uint32Array(indices), 1));
+    
+    geometry.computeVertexNormals();
+    
+    return geometry;
+}
+
+// ============================================================
+// MAIN CREATION FUNCTION
+// ============================================================
 
 export function createGargantuaBlackHole(config = {}) {
     const settings = { ...DEFAULT_GARGANTUA_CONFIG, ...config };
-    settings.innerColor = new THREE.Color(settings.innerColor);
-    settings.outerColor = new THREE.Color(settings.outerColor);
-
+    
     const group = new THREE.Group();
-    group.position.copy(
-        settings.direction.clone().multiplyScalar(settings.blackHoleDistance)
-    );
+    group.position.copy(settings.position);
+    
     group.userData = {
         type: "black-hole",
         title: "Black Hole",
-        description:
-            "A Gargantua-style black hole rendered with GPU raymarching: gravitational lensing bends the accretion disk light over and under the event horizon.",
-        note: "Cinematic visualization based on a simplified Schwarzschild light-bending model."
+        description: "Compact black hole with lensed accretion disk",
+        note: "Scientifically-inspired visualization"
     };
 
-    const uniforms = {
+    // ============================================================
+    // 1. EVENT HORIZON (Pure black center)
+    // ============================================================
+    
+    const blackCore = new THREE.Mesh(
+        new THREE.SphereGeometry(settings.horizonRadius, 64, 64),
+        new THREE.MeshBasicMaterial({
+            color: 0x000000,
+            side: THREE.FrontSide,
+            depthWrite: true,
+            depthTest: true
+        })
+    );
+    blackCore.renderOrder = 100;
+    group.add(blackCore);
+
+    // ============================================================
+    // 2. MAIN ACCRETION DISK
+    // ============================================================
+    
+    const diskGeometry = createAccretionDiskGeometry(
+        settings.diskRadius,
+        settings.diskThickness,
+        96,
+        192
+    );
+    
+    const diskUniforms = {
         uTime: { value: 0 },
-        uCenter: { value: new THREE.Vector3() },
-        uHorizonRadius: { value: settings.horizonRadius },
-        uPhotonRadius: { value: settings.photonRadius },
-        uInnerRadius: { value: settings.innerRadius },
-        uOuterRadius: { value: settings.outerRadius },
-        uInfluenceRadius: { value: settings.influenceRadius },
-        uStepSize: { value: settings.stepSize },
-        uBendStrength: { value: settings.bendStrength },
-        uDiskSpin: { value: settings.diskSpin },
-        uDiskBrightness: { value: settings.diskBrightness },
-        uDiskThickness: { value: settings.diskThickness },
-        uPhotonBrightness: { value: settings.photonBrightness },
-        uDoppler: { value: settings.doppler },
-        uGlowIntensity: { value: settings.glowIntensity },
-        uSpikeStrength: { value: settings.spikeStrength },
-        uAuraRadius: { value: settings.auraRadius },
-        uInnerColor: { value: settings.innerColor },
-        uOuterColor: { value: settings.outerColor }
+        uDiskRadius: { value: settings.diskRadius }
     };
-
-    uniforms.uCenter.value.copy(group.position);
-
-    const coreMaterial = new THREE.ShaderMaterial({
-        uniforms: { ...uniforms, uPass: { value: 0.0 } },
-        vertexShader: blackHoleVertexShader,
-        fragmentShader: blackHoleFragmentShader,
-        side: THREE.BackSide,
+    
+    const diskMaterial = new THREE.ShaderMaterial({
+        uniforms: diskUniforms,
+        vertexShader: accretionDiskVertexShader,
+        fragmentShader: accretionDiskFragmentShader,
         transparent: true,
+        blending: THREE.AdditiveBlending,
         depthWrite: false,
-        blending: THREE.NormalBlending
+        side: THREE.DoubleSide
     });
+    
+    const mainDisk = new THREE.Mesh(diskGeometry, diskMaterial);
+    mainDisk.renderOrder = 50;
+    group.add(mainDisk);
 
-    const glowMaterial = new THREE.ShaderMaterial({
-        uniforms: { ...uniforms, uPass: { value: 1.0 } },
-        vertexShader: blackHoleVertexShader,
-        fragmentShader: blackHoleFragmentShader,
-        side: THREE.BackSide,
+    // ============================================================
+    // 3. UPPER LENSED IMAGE
+    // ============================================================
+    
+    const upperDiskGeometry = createLensedDiskGeometry(
+        settings.diskRadius,
+        80,
+        160,
+        true
+    );
+    
+    const upperUniforms = {
+        uTime: { value: 0 },
+        uDiskRadius: { value: settings.diskRadius },
+        uLensingStrength: { value: settings.lensingStrength }
+    };
+    
+    const upperMaterial = new THREE.ShaderMaterial({
+        uniforms: upperUniforms,
+        vertexShader: lensedDiskVertexShader,
+        fragmentShader: lensedDiskFragmentShader,
         transparent: true,
+        blending: THREE.AdditiveBlending,
         depthWrite: false,
-        blending: THREE.AdditiveBlending
+        side: THREE.FrontSide
     });
+    
+    const upperDisk = new THREE.Mesh(upperDiskGeometry, upperMaterial);
+    upperDisk.renderOrder = 60;
+    group.add(upperDisk);
 
-    const geometry = new THREE.SphereGeometry(settings.domeRadius, 48, 32);
+    // ============================================================
+    // 4. LOWER LENSED IMAGE
+    // ============================================================
+    
+    const lowerDiskGeometry = createLensedDiskGeometry(
+        settings.diskRadius,
+        80,
+        160,
+        false
+    );
+    
+    const lowerUniforms = {
+        uTime: { value: 0 },
+        uDiskRadius: { value: settings.diskRadius },
+        uLensingStrength: { value: settings.lensingStrength * 0.5 }
+    };
+    
+    const lowerMaterial = new THREE.ShaderMaterial({
+        uniforms: lowerUniforms,
+        vertexShader: lensedDiskVertexShader,
+        fragmentShader: lensedDiskFragmentShader,
+        transparent: true,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        side: THREE.FrontSide
+    });
+    
+    const lowerDisk = new THREE.Mesh(lowerDiskGeometry, lowerMaterial);
+    lowerDisk.scale.y = -1;
+    lowerDisk.renderOrder = 40;
+    group.add(lowerDisk);
 
-    const dome = new THREE.Mesh(geometry, coreMaterial);
-    dome.frustumCulled = false;
-    dome.renderOrder = 5;
-
-    const glowDome = new THREE.Mesh(geometry, glowMaterial);
-    glowDome.frustumCulled = false;
-    glowDome.renderOrder = 6;
-
-    group.add(dome);
-    group.add(glowDome);
+    // Store for animation
+    group.userData.materials = [diskMaterial, upperMaterial, lowerMaterial];
+    group.userData.uniforms = [diskUniforms, upperUniforms, lowerUniforms];
 
     return {
         group: group,
-        dome: dome,
-        glowDome: glowDome,
-        material: coreMaterial,
-        glowMaterial: glowMaterial,
-        uniforms: uniforms,
-        time: uniforms.uTime,
+        blackCore: blackCore,
+        mainDisk: mainDisk,
+        upperDisk: upperDisk,
+        lowerDisk: lowerDisk,
         settings: settings
     };
 }

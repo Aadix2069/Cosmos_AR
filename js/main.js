@@ -374,32 +374,83 @@ const MAX_AU =
     Math.max(...Object.values(ORBIT_AU));
 
 
-
-
-
-
-
-
-
-
-
-
 const DISTANCE_COMPRESSION = {
-    power: 0.45,
-    maxVisualDistance: 57
+    inner: {
+        power: 0.65,
+        scale: 8.5,
+        offset: 0.18,
+        bias: 0
+    },
+    asteroid: {
+        power: 0.7,
+        scale: 10.8,
+        offset: 0.8,
+        bias: 28
+    },
+    outer: {
+        power: 0.74,
+        scale: 9.2,
+        offset: 1.4,
+        bias: 58
+    },
+    deep: {
+        power: 0.8,
+        scale: 8.6,
+        offset: 2.4,
+        bias: 122
+    }
 };
 
 
-function compressedDistance(au) {
+function getZoneForAU(au) {
 
-    const { power, maxVisualDistance } =
-        DISTANCE_COMPRESSION;
+    if (au < 2) return "inner";
+    if (au < 5) return "asteroid";
+    if (au < 30) return "outer";
+    return "deep";
+}
 
-    const scale =
-        maxVisualDistance /
-        Math.pow(MAX_AU, power);
 
-    return scale * Math.pow(au, power);
+function compressedDistance(au, zone = getZoneForAU(au)) {
+
+    const { power, scale, offset, bias = 0 } =
+        DISTANCE_COMPRESSION[zone] ||
+        DISTANCE_COMPRESSION.outer;
+
+    return bias + scale * Math.pow(au + offset, power);
+}
+
+
+function minimumGap(radiusA, radiusB, extraSpacing = 1.5) {
+
+    return radiusA + radiusB + extraSpacing;
+}
+
+
+function computeOrbitDistance(data, previousPlanet) {
+
+    const zone = getZoneForAU(data.distanceAU);
+    const baseDistance = compressedDistance(data.distanceAU, zone);
+
+    if (!previousPlanet) {
+        return baseDistance;
+    }
+
+    const zoneBoost =
+        zone === "inner" ? 4.2 :
+        zone === "asteroid" ? 7.5 :
+        zone === "outer" ? 10.5 : 16;
+
+    const safetyGap = minimumGap(
+        previousPlanet.data.radius,
+        data.radius,
+        zoneBoost
+    );
+
+    return Math.max(
+        baseDistance,
+        previousPlanet.data.visualDistance + safetyGap
+    );
 }
 
 
@@ -970,7 +1021,7 @@ function createPlanet(data, parentGroup) {
 
 
     const visualDistance =
-        compressedDistance(data.distanceAU);
+        data.visualDistance ?? compressedDistance(data.distanceAU, getZoneForAU(data.distanceAU));
 
 
     const pivot = new THREE.Group();
@@ -1233,11 +1284,15 @@ function createPlanet(data, parentGroup) {
 
 
 const planets = [];
+let previousPlanet = null;
 
 for (const data of PLANET_DATA) {
 
     const isInner =
         data.distanceAU < 2;
+
+    data.visualDistance =
+        computeOrbitDistance(data, previousPlanet);
 
     const planet = createPlanet(
         data,
@@ -1245,6 +1300,7 @@ for (const data of PLANET_DATA) {
     );
 
     planets.push(planet);
+    previousPlanet = planet;
 }
 
 
@@ -1325,10 +1381,42 @@ function createAsteroidBelt({
 
 
 
+const marsPlanet = planets.find(
+    (planet) => planet.data.name === "Mars"
+);
+
+const jupiterPlanet = planets.find(
+    (planet) => planet.data.name === "Jupiter"
+);
+
+const asteroidInner = Math.max(
+    compressedDistance(2.3, "asteroid"),
+    marsPlanet
+        ? marsPlanet.data.visualDistance + marsPlanet.data.radius + 2.5
+        : 0
+);
+
+const asteroidOuter = jupiterPlanet
+    ? Math.min(
+        compressedDistance(3.5, "asteroid"),
+        jupiterPlanet.data.visualDistance - jupiterPlanet.data.radius - 6.5
+    )
+    : compressedDistance(3.5, "asteroid");
+
+const asteroidStart = Math.min(
+    asteroidInner,
+    asteroidOuter - 2.5
+);
+
+const asteroidEnd = Math.max(
+    asteroidStart + 5.5,
+    asteroidOuter
+);
+
 const asteroidBelt = createAsteroidBelt({
     count: 2200,
-    inner: 16.8,
-    outer: 24.6,
+    inner: asteroidStart,
+    outer: asteroidEnd,
     thickness: 0.9,
     size: 0.1,
     color: 0x9a8f80
@@ -1399,6 +1487,12 @@ function createDwarfPlanet(data) {
 const dwarfPlanets =
     DWARF_PLANET_DATA.map(createDwarfPlanet);
 
+for (const dwarf of dwarfPlanets) {
+    dwarf.mesh.position.x =
+        compressedDistance(dwarf.data.distanceAU, getZoneForAU(dwarf.data.distanceAU));
+    dwarf.mesh.userData.distance = dwarf.mesh.position.x;
+}
+
 
 
 for (const dwarf of dwarfPlanets) {
@@ -1467,10 +1561,28 @@ function createKuiperBelt({
 }
 
 
+const neptunePlanet = planets.find(
+    (planet) => planet.data.name === "Neptune"
+);
+
+const kuiperInner = Math.max(
+    compressedDistance(44, "deep"),
+    neptunePlanet
+        ? neptunePlanet.data.visualDistance + neptunePlanet.data.radius + 9.5
+        : 0
+);
+
+const kuiperOuterCap = compressedDistance(74, "deep");
+
+const kuiperOuter = Math.max(
+    kuiperInner + 16,
+    Math.min(kuiperOuterCap, kuiperInner + 26)
+);
+
 const kuiperBelt = createKuiperBelt({
     count: 4500,
-    inner: 56,
-    outer: 74,
+    inner: kuiperInner,
+    outer: kuiperOuter,
     thickness: 2.2,
     size: 0.5,
     color: 0xa8c6ff,
@@ -1672,27 +1784,12 @@ scene.add(heliosphere);
 
 
 const BLACK_HOLE_CONFIG = {
-    blackHoleDistance: 300,
-    blackHoleScale: 6,
-    direction: new THREE.Vector3(-0.7, 0.12, -0.75).normalize(),
-    domeRadius: 2000,
-    horizonRadius: 6,
-    photonRadius: 9,
-    innerRadius: 14.4,
-    outerRadius: 31.2,
-    influenceRadius: 48,
-    stepSize: 0.9,
-    bendStrength: 1.2,
-    diskSpin: 0.22,
-    diskBrightness: 1.7,
-    diskThickness: 0.5,
-    photonBrightness: 5.0,
-    doppler: 0.55,
-    glowIntensity: 1.25,
-    spikeStrength: 0.5,
-    auraRadius: 18,
-    innerColor: 0xffffff,
-    outerColor: 0xff2200
+    position: new THREE.Vector3(290, 72, 220),
+    horizonRadius: 1.2,
+    diskRadius: 5.5,
+    diskThickness: 0.07,
+    lensingStrength: 1.8,
+    scale: 2.2
 };
 
 
@@ -1704,15 +1801,21 @@ const BLACK_HOLE_CONFIG = {
 
 const blackHoleSystem = createGargantuaBlackHole(BLACK_HOLE_CONFIG);
 
+// Apply uniform scaling to make black hole appear larger while maintaining proportions
+blackHoleSystem.group.scale.setScalar(BLACK_HOLE_CONFIG.scale);
+
 scene.add(blackHoleSystem.group);
 
 const blackHoleLabel = createLabel("BLACK HOLE", 3.5);
 
 blackHoleLabel.position.set(
     0,
-    BLACK_HOLE_CONFIG.blackHoleScale * 3.2,
+    8.0,
     0
 );
+
+// Compensate label scale so it remains proportional to black hole
+blackHoleLabel.scale.setScalar(1 / BLACK_HOLE_CONFIG.scale);
 
 blackHoleSystem.group.add(blackHoleLabel);
 
@@ -1748,8 +1851,14 @@ function animate() {
 
     const elapsed = clock.elapsedTime;
 
-    blackHoleSystem.time.value += delta;
-
+    // Update black hole shader time uniforms
+    if (blackHoleSystem.group.userData.uniforms) {
+        for (const uniforms of blackHoleSystem.group.userData.uniforms) {
+            if (uniforms.uTime) {
+                uniforms.uTime.value += delta;
+            }
+        }
+    }
 
     
     
