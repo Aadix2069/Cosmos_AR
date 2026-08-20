@@ -1,5 +1,6 @@
 // ─── COSMOS WEBXR — MOBILE TOUCH CONTROLS ──────────────────────
 // Pointer Events–based multi-touch layer for mobile devices.
+// Single authoritative input state — no conflicting copies.
 // Writes to the existing InputManager — no duplicate systems.
 // COSMOS is exposed on window by main.js — accessed via window.COSMOS
 
@@ -25,26 +26,31 @@ function el(id) {
     return document.getElementById(id);
 }
 
-// ─── State ─────────────────────────────────────────────────────
+// ─── Authoritative Input State (single source of truth) ───────
 
-// Joystick
-let joystickPointerId = null;
-const joystickCenter = { x: 0, y: 0 };
-let joystickRadius = 0;
-const joy = { x: 0, y: 0 };
-
-// Camera (right-side look)
-let cameraPointerId = null;
-const camDrag = {
-    lastX: 0,
-    lastY: 0,
-    active: false
+const mobileInput = {
+    joystick: {
+        active: false,
+        pointerId: null,
+        x: 0,
+        y: 0
+    },
+    look: {
+        active: false,
+        pointerId: null,
+        lastX: 0,
+        lastY: 0,
+        deltaX: 0,
+        deltaY: 0
+    },
+    boost: false,
+    vUp: false,
+    vDown: false
 };
 
-// Button states
-let boostActive = false;
-let vUpActive = false;
-let vDownActive = false;
+// Joystick center/radius (computed on pointerdown)
+const joystickCenter = { x: 0, y: 0 };
+let joystickRadius = 0;
 
 // Help panel
 let helpOpen = false;
@@ -55,6 +61,56 @@ let initialized = false;
 // ─── Constants ─────────────────────────────────────────────────
 
 const DEADZONE = 0.08;
+const LOOK_LEFT_CUTOFF = 0.4; // right 60% of screen for camera
+
+// ─── Reset Functions (centralized) ────────────────────────────
+
+function resetJoystick() {
+    mobileInput.joystick.active = false;
+    mobileInput.joystick.pointerId = null;
+    mobileInput.joystick.x = 0;
+    mobileInput.joystick.y = 0;
+
+    const thumb = el("mobile-joystick-thumb");
+    if (thumb) {
+        thumb.style.transform = "translate(-50%, -50%)";
+        thumb.classList.remove("active");
+    }
+}
+
+function resetLook() {
+    mobileInput.look.active = false;
+    mobileInput.look.pointerId = null;
+    mobileInput.look.lastX = 0;
+    mobileInput.look.lastY = 0;
+    mobileInput.look.deltaX = 0;
+    mobileInput.look.deltaY = 0;
+}
+
+function resetButtons() {
+    mobileInput.boost = false;
+    mobileInput.vUp = false;
+    mobileInput.vDown = false;
+
+    const IM = window.COSMOS ? window.COSMOS.InputManager : null;
+    if (IM) {
+        IM.boost = 0;
+        IM.up = 0;
+        IM.down = 0;
+    }
+
+    ["mobile-select-btn", "mobile-boost-btn", "mobile-vbtn-up", "mobile-vbtn-down"]
+        .forEach(id => {
+            const btn = el(id);
+            if (btn) btn.classList.remove("active");
+        });
+}
+
+function resetAllMobileInput() {
+    resetJoystick();
+    resetLook();
+    resetButtons();
+}
 
 // ─── Initialize ────────────────────────────────────────────────
 
@@ -73,6 +129,7 @@ export function initMobileControls() {
     setupHelpToggle();
     setupHUDAutoHide();
     setupDesktopOverrides();
+    setupEmergencyReset();
 
     window.COSMOS.onMobileUpdate = updateMobileInput;
 }
@@ -147,6 +204,23 @@ function checkOrientation() {
     }
 }
 
+// ─── Emergency Reset ───────────────────────────────────────────
+
+function setupEmergencyReset() {
+    window.addEventListener("blur", resetAllMobileInput);
+
+    document.addEventListener("visibilitychange", () => {
+        if (document.hidden) resetAllMobileInput();
+    });
+
+    document.addEventListener("pointercancel", resetAllMobileInput);
+    document.addEventListener("touchcancel", resetAllMobileInput);
+
+    window.addEventListener("orientationchange", () => {
+        setTimeout(resetAllMobileInput, 100);
+    });
+}
+
 // ─── Joystick (Pointer Events) ─────────────────────────────────
 // LEFT SIDE — movement only, never camera.
 
@@ -159,7 +233,8 @@ function setupJoystick() {
         e.preventDefault();
         e.stopPropagation();
 
-        joystickPointerId = e.pointerId;
+        mobileInput.joystick.active = true;
+        mobileInput.joystick.pointerId = e.pointerId;
 
         const rect = joyEl.getBoundingClientRect();
         joystickCenter.x = rect.left + rect.width / 2;
@@ -173,47 +248,41 @@ function setupJoystick() {
     }, { passive: false });
 
     joyEl.addEventListener("pointermove", (e) => {
-        if (e.pointerId !== joystickPointerId) return;
+        if (e.pointerId !== mobileInput.joystick.pointerId) return;
+        if (!mobileInput.joystick.active) return;
         e.preventDefault();
         updateJoystickPosition(e.clientX, e.clientY);
     }, { passive: false });
 
     joyEl.addEventListener("pointerup", (e) => {
-        if (e.pointerId !== joystickPointerId) return;
+        if (e.pointerId !== mobileInput.joystick.pointerId) return;
         resetJoystick();
     }, { passive: true });
 
     joyEl.addEventListener("pointercancel", (e) => {
-        if (e.pointerId !== joystickPointerId) return;
+        if (e.pointerId !== mobileInput.joystick.pointerId) return;
         resetJoystick();
     }, { passive: true });
 
     joyEl.addEventListener("lostpointercapture", (e) => {
-        if (e.pointerId !== joystickPointerId) return;
+        if (e.pointerId !== mobileInput.joystick.pointerId) return;
         resetJoystick();
     }, { passive: true });
 
-    // Safety net: if pointer leaves the joystick area while captured
+    // Safety net: track pointer even when it leaves the joystick element
     document.addEventListener("pointermove", (e) => {
-        if (e.pointerId !== joystickPointerId) return;
-        const joyElNow = el("mobile-joystick");
-        if (!joyElNow) return;
-        const rect = joyElNow.getBoundingClientRect();
-        const inside =
-            e.clientX >= rect.left && e.clientX <= rect.right &&
-            e.clientY >= rect.top && e.clientY <= rect.bottom;
-        if (!inside) {
-            updateJoystickPosition(e.clientX, e.clientY);
-        }
+        if (!mobileInput.joystick.active) return;
+        if (e.pointerId !== mobileInput.joystick.pointerId) return;
+        updateJoystickPosition(e.clientX, e.clientY);
     }, { passive: true });
 
     document.addEventListener("pointerup", (e) => {
-        if (e.pointerId !== joystickPointerId) return;
+        if (e.pointerId !== mobileInput.joystick.pointerId) return;
         resetJoystick();
     }, { passive: true });
 
     document.addEventListener("pointercancel", (e) => {
-        if (e.pointerId !== joystickPointerId) return;
+        if (e.pointerId !== mobileInput.joystick.pointerId) return;
         resetJoystick();
     }, { passive: true });
 }
@@ -235,8 +304,8 @@ function updateJoystickPosition(cx, cy) {
     const pctX = dx / maxR;
     const pctY = dy / maxR;
 
-    joy.x = Math.abs(pctX) > DEADZONE ? pctX : 0;
-    joy.y = Math.abs(pctY) > DEADZONE ? pctY : 0;
+    mobileInput.joystick.x = Math.abs(pctX) > DEADZONE ? pctX : 0;
+    mobileInput.joystick.y = Math.abs(pctY) > DEADZONE ? pctY : 0;
 
     const thumbHalf = thumb.offsetWidth / 2;
     const joyEl = el("mobile-joystick");
@@ -249,61 +318,72 @@ function updateJoystickPosition(cx, cy) {
         `translate(calc(-50% + ${thumbDx}px), calc(-50% + ${thumbDy}px))`;
 }
 
-function resetJoystick() {
-    joystickPointerId = null;
-    joy.x = 0;
-    joy.y = 0;
-    const thumb = el("mobile-joystick-thumb");
-    if (thumb) {
-        thumb.style.transform = "translate(-50%, -50%)";
-        thumb.classList.remove("active");
-    }
-}
-
 // ─── Camera Drag — Right-side look area (Pointer Events) ───────
 // RIGHT SIDE — camera only, never movement.
+// Uses its own independent pointerId.
 
 function setupCameraDrag() {
     const zone = el("mobile-look-zone");
     if (!zone) return;
 
     zone.addEventListener("pointerdown", (e) => {
-        if (cameraPointerId !== null) return;
+        if (mobileInput.look.active) return;
+        if (e.clientX < window.innerWidth * LOOK_LEFT_CUTOFF) return;
 
-        // Only accept touches that start on the right half
-        if (e.clientX < window.innerWidth * 0.4) return;
+        mobileInput.look.active = true;
+        mobileInput.look.pointerId = e.pointerId;
+        mobileInput.look.lastX = e.clientX;
+        mobileInput.look.lastY = e.clientY;
+        mobileInput.look.deltaX = 0;
+        mobileInput.look.deltaY = 0;
 
-        cameraPointerId = e.pointerId;
-        camDrag.lastX = e.clientX;
-        camDrag.lastY = e.clientY;
-        camDrag.active = true;
+        try { zone.setPointerCapture(e.pointerId); } catch (_) {}
     }, { passive: true });
 
-    // Document-level move/up to track finger even outside zone
+    zone.addEventListener("pointermove", (e) => {
+        if (e.pointerId !== mobileInput.look.pointerId) return;
+        if (!mobileInput.look.active) return;
+
+        mobileInput.look.deltaX += e.clientX - mobileInput.look.lastX;
+        mobileInput.look.deltaY += e.clientY - mobileInput.look.lastY;
+        mobileInput.look.lastX = e.clientX;
+        mobileInput.look.lastY = e.clientY;
+    }, { passive: true });
+
+    zone.addEventListener("pointerup", (e) => {
+        if (e.pointerId !== mobileInput.look.pointerId) return;
+        resetLook();
+    }, { passive: true });
+
+    zone.addEventListener("pointercancel", (e) => {
+        if (e.pointerId !== mobileInput.look.pointerId) return;
+        resetLook();
+    }, { passive: true });
+
+    zone.addEventListener("lostpointercapture", (e) => {
+        if (e.pointerId !== mobileInput.look.pointerId) return;
+        resetLook();
+    }, { passive: true });
+
+    // Safety net on document level
     document.addEventListener("pointermove", (e) => {
-        if (e.pointerId !== cameraPointerId || !camDrag.active) return;
+        if (!mobileInput.look.active) return;
+        if (e.pointerId !== mobileInput.look.pointerId) return;
 
-        const deltaX = e.clientX - camDrag.lastX;
-        const deltaY = e.clientY - camDrag.lastY;
-
-        const IM = window.COSMOS.InputManager;
-        IM.lookX += deltaX;
-        IM.lookY += deltaY;
-
-        camDrag.lastX = e.clientX;
-        camDrag.lastY = e.clientY;
+        mobileInput.look.deltaX += e.clientX - mobileInput.look.lastX;
+        mobileInput.look.deltaY += e.clientY - mobileInput.look.lastY;
+        mobileInput.look.lastX = e.clientX;
+        mobileInput.look.lastY = e.clientY;
     }, { passive: true });
 
     document.addEventListener("pointerup", (e) => {
-        if (e.pointerId !== cameraPointerId) return;
-        cameraPointerId = null;
-        camDrag.active = false;
+        if (e.pointerId !== mobileInput.look.pointerId) return;
+        resetLook();
     }, { passive: true });
 
     document.addEventListener("pointercancel", (e) => {
-        if (e.pointerId !== cameraPointerId) return;
-        cameraPointerId = null;
-        camDrag.active = false;
+        if (e.pointerId !== mobileInput.look.pointerId) return;
+        resetLook();
     }, { passive: true });
 }
 
@@ -349,7 +429,7 @@ function setupBoostButton() {
         e.preventDefault();
         e.stopPropagation();
         btn.classList.add("active");
-        boostActive = true;
+        mobileInput.boost = true;
         window.COSMOS.InputManager.boost = 1;
         try { navigator.vibrate && navigator.vibrate(10); } catch (_) {}
     }, { passive: false });
@@ -357,36 +437,36 @@ function setupBoostButton() {
     btn.addEventListener("pointerup", (e) => {
         e.stopPropagation();
         btn.classList.remove("active");
-        boostActive = false;
+        mobileInput.boost = false;
         window.COSMOS.InputManager.boost = 0;
     }, { passive: true });
 
     btn.addEventListener("pointercancel", () => {
         btn.classList.remove("active");
-        boostActive = false;
+        mobileInput.boost = false;
         window.COSMOS.InputManager.boost = 0;
     }, { passive: true });
 
     btn.addEventListener("pointerleave", () => {
         btn.classList.remove("active");
-        boostActive = false;
+        mobileInput.boost = false;
         window.COSMOS.InputManager.boost = 0;
     }, { passive: true });
 }
 
 function setupVerticalButtons() {
-    setupVerticalBtn("mobile-vbtn-up", "up", (active) => {
-        vUpActive = active;
+    setupVerticalBtn("mobile-vbtn-up", (active) => {
+        mobileInput.vUp = active;
         window.COSMOS.InputManager.up = active ? 1 : 0;
     });
 
-    setupVerticalBtn("mobile-vbtn-down", "down", (active) => {
-        vDownActive = active;
+    setupVerticalBtn("mobile-vbtn-down", (active) => {
+        mobileInput.vDown = active;
         window.COSMOS.InputManager.down = active ? 1 : 0;
     });
 }
 
-function setupVerticalBtn(id, _dir, onChange) {
+function setupVerticalBtn(id, onChange) {
     const btn = el(id);
     if (!btn) return;
 
@@ -500,28 +580,31 @@ function setupDesktopOverrides() {
     }
 }
 
-// ─── Input Update (called each frame from animate) ─────────────
-// Movement: writes directly to InputManager.
-// Camera look: raw pixel deltas pass through to InputManager.lookX/lookY.
-//   FlyingController.update() in main.js consumes them with its own
-//   lookSensitivity and pitch clamping — we do NOT process or zero them here.
+// ─── Frame-Safe Input Update (called each frame from animate) ──
+// ALWAYS writes current mobile input state to InputManager.
+// No guards on previous InputManager values — that was the sticking bug.
 
 function updateMobileInput() {
     if (!isTouchDevice || !window.COSMOS) return;
 
     const IM = window.COSMOS.InputManager;
 
-    // ── Movement from joystick (only when no keyboard input active) ──
-    if (!IM.forward && !IM.backward && !IM.left && !IM.right) {
-        IM.forward = joy.y < -DEADZONE ? Math.abs(joy.y) : 0;
-        IM.backward = joy.y > DEADZONE ? Math.abs(joy.y) : 0;
-        IM.left = joy.x < -DEADZONE ? Math.abs(joy.x) : 0;
-        IM.right = joy.x > DEADZONE ? Math.abs(joy.x) : 0;
-    }
+    // ── Movement: ALWAYS write from mobileInput.joystick ──
+    const jx = mobileInput.joystick.x;
+    const jy = mobileInput.joystick.y;
 
-    // Camera look: IM.lookX/IM.lookY are set by setupCameraDrag.
-    // FlyingController.update() applies its own sensitivity and reads/resets them.
-    // We do NOT touch them here.
+    IM.forward = jy < -DEADZONE ? Math.abs(jy) : 0;
+    IM.backward = jy > DEADZONE ? Math.abs(jy) : 0;
+    IM.left = jx < -DEADZONE ? Math.abs(jx) : 0;
+    IM.right = jx > DEADZONE ? Math.abs(jx) : 0;
+
+    // ── Camera look: consume accumulated deltas, then clear ──
+    if (mobileInput.look.deltaX !== 0 || mobileInput.look.deltaY !== 0) {
+        IM.lookX += mobileInput.look.deltaX;
+        IM.lookY += mobileInput.look.deltaY;
+        mobileInput.look.deltaX = 0;
+        mobileInput.look.deltaY = 0;
+    }
 
     // Keep crosshair visible on mobile
     if (crosshairEl && !crosshairEl.classList.contains("visible")) {
