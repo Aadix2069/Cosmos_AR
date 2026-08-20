@@ -1,0 +1,415 @@
+/* =========================================
+   COSMOS WEBXR — MOBILE HUD
+   ========================================= */
+
+/* ── Orientation Overlay ─────────────────── */
+
+#mobile-orientation {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 2000;
+    background: rgba(4, 6, 18, 0.96);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 20px;
+    color: rgba(255, 255, 255, 0.85);
+    text-align: center;
+}
+
+#mobile-orientation.visible {
+    display: flex;
+}
+
+.orientation-icon {
+    width: 64px;
+    height: 64px;
+    border: 2px solid rgba(120, 200, 255, 0.5);
+    border-radius: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    animation: rotate-device 2.5s ease-in-out infinite;
+    color: rgba(120, 200, 255, 0.8);
+    font-size: 28px;
+}
+
+@keyframes rotate-device {
+    0%, 100% { transform: rotate(0deg); }
+    25% { transform: rotate(90deg); }
+    75% { transform: rotate(90deg); }
+}
+
+.orientation-text {
+    font-size: 15px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    font-weight: 600;
+}
+
+.orientation-sub {
+    font-size: 11px;
+    letter-spacing: 1px;
+    color: rgba(255, 255, 255, 0.35);
+    text-transform: none;
+}
+
+
+/* ── Mobile HUD Container ────────────────── */
+
+#mobile-hud {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+    pointer-events: none;
+    touch-action: none;
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+}
+
+#mobile-hud.active {
+    display: block;
+}
+
+#mobile-hud * {
+    box-sizing: border-box;
+    -webkit-tap-highlight-color: transparent;
+}
+
+/* ── Top Bar ─────────────────────────────── */
+
+.mobile-top {
+    position: absolute;
+    top: env(safe-area-inset-top, 8px);
+    left: env(safe-area-inset-left, 10px);
+    right: env(safe-area-inset-right, 10px);
+    height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 6px;
+    pointer-events: none;
+}
+
+.mobile-status {
+    font-size: 10px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.3);
+    font-weight: 600;
+}
+
+.mobile-help-btn {
+    pointer-events: auto;
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+    background: rgba(10, 12, 30, 0.55);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.55);
+    font-size: 15px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: background 0.2s, border-color 0.2s;
+}
+
+.mobile-help-btn:active {
+    background: rgba(120, 200, 255, 0.15);
+    border-color: rgba(120, 200, 255, 0.3);
+}
+
+/* ── Help Panel ──────────────────────────── */
+
+.mobile-help-panel {
+    position: absolute;
+    top: 52px;
+    right: 10px;
+    width: clamp(200px, 38vw, 260px);
+    background: rgba(10, 12, 30, 0.75);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 14px;
+    padding: 16px;
+    pointer-events: auto;
+    opacity: 0;
+    transform: translateY(-6px);
+    transition: opacity 0.25s, transform 0.25s;
+    z-index: 50;
+    box-shadow:
+        0 8px 32px rgba(0, 0, 0, 0.5),
+        inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.mobile-help-panel.open {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+.mobile-help-title {
+    font-size: 9px;
+    letter-spacing: 2.5px;
+    text-transform: uppercase;
+    color: rgba(120, 200, 255, 0.6);
+    font-weight: 700;
+    margin-bottom: 12px;
+}
+
+.mobile-help-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 5px 0;
+}
+
+.mobile-help-action {
+    min-width: 52px;
+    font-size: 8px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.55);
+    font-weight: 700;
+}
+
+.mobile-help-method {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.35);
+}
+
+/* ── Joystick ────────────────────────────── */
+
+.mobile-joystick {
+    position: absolute;
+    bottom: clamp(20px, 5vh, 40px);
+    left: clamp(14px, 4vw, 30px);
+    width: clamp(110px, 22vw, 150px);
+    height: clamp(110px, 22vw, 150px);
+    pointer-events: auto;
+    touch-action: none;
+}
+
+.joystick-base {
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    background: rgba(10, 12, 30, 0.45);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1.5px solid rgba(255, 255, 255, 0.1);
+    box-shadow:
+        0 4px 20px rgba(0, 0, 0, 0.4),
+        inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.joystick-thumb {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 36%;
+    height: 36%;
+    transform: translate(-50%, -50%);
+    border-radius: 50%;
+    background: radial-gradient(
+        circle at 35% 35%,
+        rgba(120, 200, 255, 0.35) 0%,
+        rgba(120, 200, 255, 0.15) 60%,
+        rgba(120, 200, 255, 0.05) 100%
+    );
+    border: 1.5px solid rgba(120, 200, 255, 0.3);
+    box-shadow:
+        0 0 16px rgba(120, 200, 255, 0.2),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1);
+    transition: box-shadow 0.15s, border-color 0.15s;
+}
+
+.joystick-thumb.active {
+    border-color: rgba(120, 200, 255, 0.55);
+    box-shadow:
+        0 0 24px rgba(120, 200, 255, 0.35),
+        inset 0 1px 0 rgba(255, 255, 255, 0.15);
+}
+
+.joystick-label {
+    position: absolute;
+    bottom: -22px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 8px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.18);
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+/* ── Vertical Buttons (beside joystick) ──── */
+
+.mobile-vertical {
+    position: absolute;
+    bottom: clamp(20px, 5vh, 40px);
+    left: calc(clamp(14px, 4vw, 30px) + clamp(110px, 22vw, 150px) + clamp(10px, 2.5vw, 18px));
+    display: flex;
+    flex-direction: column;
+    gap: clamp(6px, 1.2vh, 10px);
+    pointer-events: auto;
+    touch-action: none;
+}
+
+.mobile-vbtn {
+    width: clamp(42px, 9vw, 56px);
+    height: clamp(36px, 6.5vh, 46px);
+    border-radius: 10px;
+    background: rgba(10, 12, 30, 0.5);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.55);
+    font-size: 9px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+    touch-action: none;
+}
+
+.mobile-vbtn:active,
+.mobile-vbtn.active {
+    background: rgba(120, 200, 255, 0.15);
+    border-color: rgba(120, 200, 255, 0.35);
+    color: rgba(120, 200, 255, 0.9);
+}
+
+/* ── Right-side Buttons ──────────────────── */
+
+.mobile-right-btns {
+    position: absolute;
+    bottom: clamp(20px, 5vh, 40px);
+    right: clamp(14px, 4vw, 30px);
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: clamp(8px, 1.5vh, 14px);
+    pointer-events: auto;
+    touch-action: none;
+}
+
+.mobile-select-btn,
+.mobile-boost-btn {
+    border-radius: 14px;
+    background: rgba(10, 12, 30, 0.55);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 10px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, color 0.15s, box-shadow 0.15s;
+    touch-action: none;
+}
+
+.mobile-select-btn {
+    width: clamp(64px, 14vw, 84px);
+    height: clamp(50px, 9vh, 64px);
+}
+
+.mobile-boost-btn {
+    width: clamp(56px, 12vw, 72px);
+    height: clamp(38px, 7vh, 48px);
+    font-size: 9px;
+}
+
+.mobile-select-btn:active,
+.mobile-select-btn.active {
+    background: rgba(120, 200, 255, 0.2);
+    border-color: rgba(120, 200, 255, 0.5);
+    color: rgba(120, 200, 255, 0.95);
+    box-shadow: 0 0 20px rgba(120, 200, 255, 0.2);
+}
+
+.mobile-boost-btn:active,
+.mobile-boost-btn.active {
+    background: rgba(255, 180, 80, 0.2);
+    border-color: rgba(255, 180, 80, 0.5);
+    color: rgba(255, 200, 100, 0.95);
+    box-shadow: 0 0 20px rgba(255, 180, 80, 0.2);
+}
+
+/* ── Camera drag zone visual hint ────────── */
+
+.mobile-look-zone {
+    position: absolute;
+    top: 0;
+    left: 50%;
+    right: 0;
+    bottom: 0;
+    pointer-events: auto;
+    touch-action: none;
+}
+
+
+/* ── HUD Dimmed (info panel open) ────────── */
+
+#mobile-hud.dimmed .mobile-joystick,
+#mobile-hud.dimmed .mobile-vertical,
+#mobile-hud.dimmed .mobile-right-btns {
+    opacity: 0.3;
+    transition: opacity 0.4s;
+}
+
+#mobile-hud.dimmed .mobile-look-zone {
+    pointer-events: none;
+}
+
+
+/* ── Desktop: ensure mobile HUD is hidden ── */
+
+@media (hover: hover) and (pointer: fine) {
+    #mobile-orientation,
+    #mobile-hud {
+        display: none !important;
+    }
+}
+
+/* ── Small landscape screens ─────────────── */
+
+@media (max-height: 420px) {
+    .mobile-joystick {
+        width: clamp(90px, 20vw, 120px);
+        height: clamp(90px, 20vw, 120px);
+    }
+
+    .mobile-select-btn {
+        width: clamp(56px, 13vw, 72px);
+        height: clamp(42px, 8vh, 54px);
+    }
+
+    .mobile-boost-btn {
+        width: clamp(48px, 11vw, 60px);
+        height: clamp(32px, 6vh, 40px);
+    }
+
+    .mobile-vbtn {
+        width: clamp(36px, 8vw, 46px);
+        height: clamp(30px, 5.5vh, 38px);
+    }
+}

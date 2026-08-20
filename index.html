@@ -6,7 +6,7 @@
 
     <meta
         name="viewport"
-        content="width=device-width, initial-scale=1.0"
+        content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
     >
 
     <title>COSMOS — Solar System Explorer</title>
@@ -14,6 +14,11 @@
     <link
         rel="stylesheet"
         href="./css/style.css"
+    >
+
+    <link
+        rel="stylesheet"
+        href="./css/mobile.css"
     >
 </head>
 
@@ -102,6 +107,15 @@
     <div id="info-panel">
         <div id="info-panel-inner"></div>
     </div>
+
+
+    <div id="mobile-orientation">
+        <div class="orientation-icon">&#8635;</div>
+        <div class="orientation-text">Rotate Your Device</div>
+        <div class="orientation-sub">COSMOS works best in landscape</div>
+    </div>
+
+    <div id="mobile-hud"></div>
 
 
     <script type="importmap">

@@ -91,6 +91,9 @@ function requestPointerLock() {
 }
 
 document.addEventListener("pointerlockchange", () => {
+    // Skip on touch devices — mobile controls manage HUD directly
+    if (window.COSMOS && window.COSMOS._isTouchDevice) return;
+
     InputManager.isLocked =
         document.pointerLockElement === InputManager.domElement;
 
@@ -2408,6 +2411,9 @@ function breakFollow() {
 renderer.domElement.addEventListener("click", (event) => {
     if (flyTo.active) return;
 
+    // Skip on touch devices — mobileControls handles selection
+    if (window.COSMOS && window.COSMOS._isTouchDevice) return;
+
     // First click: request pointer lock
     if (!InputManager.isLocked) {
         requestPointerLock();
@@ -2715,6 +2721,11 @@ function animate() {
     // ISS tracker update
     issTracker.update(delta);
 
+    // Mobile touch input update
+    if (window.COSMOS && window.COSMOS.onMobileUpdate) {
+        window.COSMOS.onMobileUpdate();
+    }
+
     FlyingController.update(flyTo.active ? 0 : delta);
 
     renderer.render(scene, camera);
@@ -2762,6 +2773,24 @@ controlsClose.addEventListener("click", (e) => {
     e.stopPropagation();
     controlsPanel.classList.add("hidden");
 });
+
+
+// ─── Mobile Controls Bridge ────────────────────────────────────
+
+window.COSMOS = {
+    InputManager,
+    FlyingController,
+    CrosshairRaycaster,
+    flyTo,
+    startFlyTo,
+    showInfoPanel,
+    closeInfoPanel,
+    breakFollow,
+    onMobileUpdate: null,
+    _isTouchDevice: false
+};
+
+import("./mobileControls.js");
 
 
 renderer.setAnimationLoop(animate);
