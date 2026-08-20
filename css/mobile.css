@@ -1,5 +1,7 @@
 /* =========================================
    COSMOS WEBXR — MOBILE HUD
+   PUBG / Free Fire–style touch ergonomics
+   with COSMOS futuristic visual identity
    ========================================= */
 
 /* ── Orientation Overlay ─────────────────── */
@@ -81,6 +83,7 @@
     -webkit-tap-highlight-color: transparent;
 }
 
+
 /* ── Top Bar ─────────────────────────────── */
 
 .mobile-top {
@@ -106,9 +109,9 @@
 
 .mobile-help-btn {
     pointer-events: auto;
-    width: 36px;
-    height: 36px;
-    border-radius: 10px;
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
     background: rgba(10, 12, 30, 0.55);
     backdrop-filter: blur(14px);
     -webkit-backdrop-filter: blur(14px);
@@ -120,13 +123,15 @@
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    transition: background 0.2s, border-color 0.2s;
+    transition: transform 0.15s ease, background 0.2s, border-color 0.2s;
 }
 
 .mobile-help-btn:active {
+    transform: scale(0.9);
     background: rgba(120, 200, 255, 0.15);
     border-color: rgba(120, 200, 255, 0.3);
 }
+
 
 /* ── Help Panel ──────────────────────────── */
 
@@ -186,14 +191,28 @@
     color: rgba(255, 255, 255, 0.35);
 }
 
+
+/* ── Camera Look Zone (right half) ──────── */
+
+.mobile-look-zone {
+    position: absolute;
+    top: 0;
+    left: 40%;
+    right: 0;
+    bottom: 0;
+    pointer-events: auto;
+    touch-action: none;
+}
+
+
 /* ── Joystick ────────────────────────────── */
 
 .mobile-joystick {
     position: absolute;
     bottom: clamp(20px, 5vh, 40px);
     left: clamp(14px, 4vw, 30px);
-    width: clamp(110px, 22vw, 150px);
-    height: clamp(110px, 22vw, 150px);
+    width: clamp(120px, 24vw, 160px);
+    height: clamp(120px, 24vw, 160px);
     pointer-events: auto;
     touch-action: none;
 }
@@ -202,10 +221,10 @@
     position: absolute;
     inset: 0;
     border-radius: 50%;
-    background: rgba(10, 12, 30, 0.45);
+    background: rgba(10, 12, 30, 0.4);
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
-    border: 1.5px solid rgba(255, 255, 255, 0.1);
+    border: 1.5px solid rgba(255, 255, 255, 0.08);
     box-shadow:
         0 4px 20px rgba(0, 0, 0, 0.4),
         inset 0 1px 0 rgba(255, 255, 255, 0.04);
@@ -215,8 +234,8 @@
     position: absolute;
     top: 50%;
     left: 50%;
-    width: 36%;
-    height: 36%;
+    width: 38%;
+    height: 38%;
     transform: translate(-50%, -50%);
     border-radius: 50%;
     background: radial-gradient(
@@ -229,14 +248,16 @@
     box-shadow:
         0 0 16px rgba(120, 200, 255, 0.2),
         inset 0 1px 0 rgba(255, 255, 255, 0.1);
-    transition: box-shadow 0.15s, border-color 0.15s;
+    transition: box-shadow 0.12s, border-color 0.12s, transform 0.08s ease-out;
+    will-change: transform;
 }
 
 .joystick-thumb.active {
     border-color: rgba(120, 200, 255, 0.55);
     box-shadow:
-        0 0 24px rgba(120, 200, 255, 0.35),
+        0 0 28px rgba(120, 200, 255, 0.35),
         inset 0 1px 0 rgba(255, 255, 255, 0.15);
+    transform: translate(-50%, -50%) scale(1.08);
 }
 
 .joystick-label {
@@ -252,12 +273,13 @@
     white-space: nowrap;
 }
 
+
 /* ── Vertical Buttons (beside joystick) ──── */
 
 .mobile-vertical {
     position: absolute;
     bottom: clamp(20px, 5vh, 40px);
-    left: calc(clamp(14px, 4vw, 30px) + clamp(110px, 22vw, 150px) + clamp(10px, 2.5vw, 18px));
+    left: calc(clamp(14px, 4vw, 30px) + clamp(120px, 24vw, 160px) + clamp(10px, 2.5vw, 18px));
     display: flex;
     flex-direction: column;
     gap: clamp(6px, 1.2vh, 10px);
@@ -266,9 +288,9 @@
 }
 
 .mobile-vbtn {
-    width: clamp(42px, 9vw, 56px);
-    height: clamp(36px, 6.5vh, 46px);
-    border-radius: 10px;
+    width: clamp(44px, 9vw, 58px);
+    height: clamp(38px, 6.5vh, 48px);
+    border-radius: 12px;
     background: rgba(10, 12, 30, 0.5);
     backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
@@ -282,18 +304,20 @@
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    transition: background 0.15s, border-color 0.15s, color 0.15s;
+    transition: transform 0.12s ease, background 0.15s, border-color 0.15s, color 0.15s;
     touch-action: none;
 }
 
 .mobile-vbtn:active,
 .mobile-vbtn.active {
+    transform: scale(0.92);
     background: rgba(120, 200, 255, 0.15);
     border-color: rgba(120, 200, 255, 0.35);
     color: rgba(120, 200, 255, 0.9);
 }
 
-/* ── Right-side Buttons ──────────────────── */
+
+/* ── Right-side Action Buttons ───────────── */
 
 .mobile-right-btns {
     position: absolute;
@@ -302,68 +326,59 @@
     display: flex;
     flex-direction: column;
     align-items: flex-end;
-    gap: clamp(8px, 1.5vh, 14px);
+    gap: clamp(10px, 1.8vh, 16px);
     pointer-events: auto;
     touch-action: none;
 }
 
 .mobile-select-btn,
 .mobile-boost-btn {
-    border-radius: 14px;
+    border-radius: 50%;
     background: rgba(10, 12, 30, 0.55);
     backdrop-filter: blur(14px);
     -webkit-backdrop-filter: blur(14px);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    border: 1.5px solid rgba(255, 255, 255, 0.1);
     color: rgba(255, 255, 255, 0.6);
-    font-size: 10px;
-    letter-spacing: 2px;
+    font-size: 9px;
+    letter-spacing: 1.5px;
     text-transform: uppercase;
     font-weight: 700;
     display: flex;
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    transition: background 0.15s, border-color 0.15s, color 0.15s, box-shadow 0.15s;
+    transition: transform 0.12s ease, background 0.15s, border-color 0.15s, color 0.15s, box-shadow 0.15s;
     touch-action: none;
 }
 
 .mobile-select-btn {
-    width: clamp(64px, 14vw, 84px);
-    height: clamp(50px, 9vh, 64px);
+    width: clamp(68px, 15vw, 88px);
+    height: clamp(68px, 15vw, 88px);
+    font-size: 10px;
 }
 
 .mobile-boost-btn {
-    width: clamp(56px, 12vw, 72px);
-    height: clamp(38px, 7vh, 48px);
-    font-size: 9px;
+    width: clamp(54px, 12vw, 70px);
+    height: clamp(54px, 12vw, 70px);
+    font-size: 8px;
 }
 
 .mobile-select-btn:active,
 .mobile-select-btn.active {
+    transform: scale(0.9);
     background: rgba(120, 200, 255, 0.2);
     border-color: rgba(120, 200, 255, 0.5);
     color: rgba(120, 200, 255, 0.95);
-    box-shadow: 0 0 20px rgba(120, 200, 255, 0.2);
+    box-shadow: 0 0 24px rgba(120, 200, 255, 0.25);
 }
 
 .mobile-boost-btn:active,
 .mobile-boost-btn.active {
+    transform: scale(0.9);
     background: rgba(255, 180, 80, 0.2);
     border-color: rgba(255, 180, 80, 0.5);
     color: rgba(255, 200, 100, 0.95);
     box-shadow: 0 0 20px rgba(255, 180, 80, 0.2);
-}
-
-/* ── Camera drag zone visual hint ────────── */
-
-.mobile-look-zone {
-    position: absolute;
-    top: 0;
-    left: 50%;
-    right: 0;
-    bottom: 0;
-    pointer-events: auto;
-    touch-action: none;
 }
 
 
@@ -372,7 +387,7 @@
 #mobile-hud.dimmed .mobile-joystick,
 #mobile-hud.dimmed .mobile-vertical,
 #mobile-hud.dimmed .mobile-right-btns {
-    opacity: 0.3;
+    opacity: 0.25;
     transition: opacity 0.4s;
 }
 
@@ -390,26 +405,48 @@
     }
 }
 
+
 /* ── Small landscape screens ─────────────── */
 
 @media (max-height: 420px) {
     .mobile-joystick {
-        width: clamp(90px, 20vw, 120px);
-        height: clamp(90px, 20vw, 120px);
+        width: clamp(95px, 20vw, 125px);
+        height: clamp(95px, 20vw, 125px);
     }
 
     .mobile-select-btn {
         width: clamp(56px, 13vw, 72px);
-        height: clamp(42px, 8vh, 54px);
+        height: clamp(56px, 13vw, 72px);
     }
 
     .mobile-boost-btn {
-        width: clamp(48px, 11vw, 60px);
-        height: clamp(32px, 6vh, 40px);
+        width: clamp(46px, 10vw, 58px);
+        height: clamp(46px, 10vw, 58px);
     }
 
     .mobile-vbtn {
         width: clamp(36px, 8vw, 46px);
         height: clamp(30px, 5.5vh, 38px);
+    }
+}
+
+
+/* ── Taller screens (portrait-ish tablets) ─ */
+
+@media (min-height: 700px) and (orientation: landscape) {
+    .mobile-joystick {
+        bottom: clamp(30px, 8vh, 55px);
+        width: clamp(130px, 22vw, 170px);
+        height: clamp(130px, 22vw, 170px);
+    }
+
+    .mobile-select-btn {
+        width: clamp(74px, 14vw, 92px);
+        height: clamp(74px, 14vw, 92px);
+    }
+
+    .mobile-boost-btn {
+        width: clamp(60px, 11vw, 74px);
+        height: clamp(60px, 11vw, 74px);
     }
 }
