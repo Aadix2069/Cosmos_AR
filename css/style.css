@@ -10,11 +10,13 @@ body {
     height: 100%;
     overflow: hidden;
     background: #000;
-    font-family: Arial, Helvetica, sans-serif;
+    font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Arial, sans-serif;
+    user-select: none;
 }
 
 canvas {
     display: block;
+    cursor: none;
 }
 
 
@@ -113,7 +115,7 @@ canvas {
 
 
 /* =========================
-   UI
+   UI LAYER
    ========================= */
 
 #scene-ui {
@@ -136,59 +138,743 @@ canvas {
 .brand {
     position: absolute;
 
-    top: 25px;
-    left: 30px;
+    top: 24px;
+    left: 28px;
 
     display: flex;
     flex-direction: column;
 
-    gap: 5px;
+    gap: 4px;
 }
 
 .brand-title {
-    font-size: 22px;
-
-    letter-spacing: 7px;
-
-    font-weight: 600;
+    font-size: 18px;
+    letter-spacing: 6px;
+    font-weight: 700;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.9);
 }
 
 .brand-subtitle {
-    font-size: 9px;
-
+    font-size: 8px;
     letter-spacing: 3px;
-
-    color: rgba(255, 255, 255, 0.55);
+    color: rgba(255, 255, 255, 0.35);
+    text-transform: uppercase;
 }
 
 
 /* =========================
-   INSTRUCTIONS
+   CROSSHAIR
    ========================= */
 
-.instructions {
-    position: absolute;
-
-    bottom: 25px;
+#crosshair {
+    position: fixed;
+    top: 50%;
     left: 50%;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+    z-index: 20;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
 
+#crosshair.visible {
+    opacity: 1;
+}
+
+#crosshair svg {
+    filter: drop-shadow(0 0 3px rgba(255, 255, 255, 0.2));
+    transition: transform 0.15s ease;
+}
+
+#crosshair.targeting svg {
+    transform: scale(1.2);
+}
+
+#crosshair.targeting svg line {
+    stroke: rgba(120, 200, 255, 0.9);
+}
+
+#crosshair.targeting svg circle {
+    stroke: rgba(120, 200, 255, 0.6);
+}
+
+
+/* =========================
+   CROSSHAIR NAME
+   ========================= */
+
+#crosshair-name {
+    position: fixed;
+    top: calc(50% + 28px);
+    left: 50%;
     transform: translateX(-50%);
-
-    display: flex;
-
-    gap: 20px;
-
-    padding: 10px 18px;
-
-    border-radius: 30px;
-
-    background: rgba(0, 0, 0, 0.35);
-
-    backdrop-filter: blur(8px);
-
-    color: rgba(255, 255, 255, 0.7);
-
+    pointer-events: none;
+    z-index: 20;
+    opacity: 0;
+    transition: opacity 0.2s ease;
     font-size: 12px;
-
+    font-weight: 600;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.75);
+    text-shadow: 0 0 8px rgba(100, 180, 255, 0.4);
     white-space: nowrap;
+}
+
+#crosshair-name.visible {
+    opacity: 1;
+}
+
+
+/* =========================
+   POINTER LOCK HINT
+   ========================= */
+
+.hint-overlay {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+    padding: 28px 48px;
+    border-radius: 20px;
+    background: rgba(10, 12, 30, 0.6);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 14px;
+    letter-spacing: 1.5px;
+    pointer-events: none;
+    z-index: 20;
+    transition: opacity 0.4s ease;
+    box-shadow:
+        0 8px 32px rgba(0, 0, 0, 0.4),
+        inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.hint-overlay.hidden {
+    opacity: 0;
+}
+
+.hint-icon {
+    font-size: 36px;
+    opacity: 0.6;
+    animation: hintPulse 3s ease-in-out infinite;
+}
+
+@keyframes hintPulse {
+    0%, 100% { transform: scale(1); opacity: 0.6; }
+    50% { transform: scale(1.1); opacity: 1; }
+}
+
+.hint-sub {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.35);
+    letter-spacing: 0.8px;
+}
+
+
+/* =========================
+   ISS TRACKER HUD
+   ========================= */
+
+.iss-hud {
+    position: absolute;
+    bottom: 24px;
+    left: 24px;
+    padding: 12px 16px;
+    border-radius: 12px;
+    background: rgba(8, 10, 28, 0.6);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 11px;
+    pointer-events: none;
+    z-index: 15;
+    transition: opacity 0.4s ease;
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3);
+}
+
+.iss-hud.hidden {
+    opacity: 0;
+}
+
+.iss-hud-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.iss-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: rgba(100, 255, 180, 0.7);
+    animation: followPulse 2s ease-in-out infinite;
+}
+
+.iss-title {
+    font-size: 9px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.5);
+}
+
+.iss-hud-stats {
+    display: flex;
+    gap: 14px;
+}
+
+.iss-stat {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.iss-stat-label {
+    font-size: 8px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.3);
+    font-weight: 600;
+}
+
+.iss-stat span:last-child {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.8);
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+}
+
+
+/* =========================
+   DASHBOARD — GLASS PANEL
+   ========================= */
+
+#info-panel {
+    position: fixed;
+    top: 0;
+    right: 0;
+    width: 400px;
+    height: 100vh;
+    z-index: 50;
+    pointer-events: none;
+    display: flex;
+    align-items: stretch;
+    justify-content: flex-end;
+    transition: opacity 0.4s cubic-bezier(0.22, 1, 0.36, 1), transform 0.4s cubic-bezier(0.22, 1, 0.36, 1);
+    opacity: 0;
+    transform: translateX(40px);
+}
+
+#info-panel.visible {
+    opacity: 1;
+    transform: translateX(0);
+    pointer-events: auto;
+}
+
+#info-panel-inner {
+    width: 100%;
+    height: 100%;
+    padding: 32px 28px;
+    overflow-y: auto;
+    background: linear-gradient(
+        135deg,
+        rgba(8, 10, 28, 0.72) 0%,
+        rgba(12, 14, 35, 0.58) 50%,
+        rgba(8, 10, 28, 0.72) 100%
+    );
+    backdrop-filter: blur(32px) saturate(1.6) brightness(1.1);
+    -webkit-backdrop-filter: blur(32px) saturate(1.6) brightness(1.1);
+    border-left: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow:
+        -12px 0 48px rgba(0, 0, 0, 0.6),
+        inset 1px 0 0 rgba(255, 255, 255, 0.05),
+        inset 0 1px 0 rgba(255, 255, 255, 0.03);
+    transform-style: preserve-3d;
+}
+
+#info-panel-inner::before {
+    content: "";
+    position: fixed;
+    top: 0;
+    right: 0;
+    width: 400px;
+    height: 100%;
+    background: linear-gradient(
+        180deg,
+        rgba(255, 255, 255, 0.03) 0%,
+        transparent 40%,
+        transparent 60%,
+        rgba(255, 255, 255, 0.01) 100%
+    );
+    pointer-events: none;
+    z-index: -1;
+}
+
+#info-panel-inner::-webkit-scrollbar {
+    width: 3px;
+}
+
+#info-panel-inner::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+#info-panel-inner::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 2px;
+}
+
+
+/* =========================
+   DASHBOARD — CLOSE
+   ========================= */
+
+#info-close {
+    position: sticky;
+    top: 0;
+    float: right;
+    width: 28px;
+    height: 28px;
+    border: none;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 6px;
+    color: rgba(255, 255, 255, 0.4);
+    font-size: 18px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.2s, color 0.2s;
+    pointer-events: auto;
+    z-index: 10;
+}
+
+#info-close:hover {
+    background: rgba(255, 80, 80, 0.12);
+    color: rgba(255, 100, 100, 0.9);
+}
+
+
+/* =========================
+   DASHBOARD — HEADER
+   ========================= */
+
+.dash-header {
+    margin-bottom: 20px;
+    padding-right: 36px;
+}
+
+.dash-type {
+    display: inline-block;
+    padding: 3px 10px;
+    border: 1px solid;
+    border-radius: 6px;
+    font-size: 9px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    font-weight: 600;
+    margin-bottom: 10px;
+}
+
+.dash-name {
+    font-size: 26px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    color: rgba(255, 255, 255, 0.92);
+    line-height: 1.2;
+    margin-bottom: 6px;
+}
+
+.dash-tagline {
+    font-size: 13px;
+    font-style: italic;
+    color: rgba(255, 255, 255, 0.4);
+    line-height: 1.5;
+}
+
+
+/* =========================
+   DASHBOARD — DESCRIPTION
+   ========================= */
+
+.dash-description {
+    font-size: 13px;
+    line-height: 1.75;
+    color: rgba(255, 255, 255, 0.55);
+    margin-bottom: 20px;
+    padding-bottom: 18px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+
+/* =========================
+   DASHBOARD — SECTIONS
+   ========================= */
+
+.dash-section {
+    margin-bottom: 20px;
+    padding-bottom: 18px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.dash-section:last-of-type {
+    border-bottom: none;
+    margin-bottom: 0;
+}
+
+.dash-section-title {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: rgba(255, 255, 255, 0.35);
+    font-weight: 700;
+    margin-bottom: 10px;
+}
+
+.dash-body {
+    font-size: 13px;
+    line-height: 1.75;
+    color: rgba(255, 255, 255, 0.5);
+}
+
+
+/* =========================
+   DASHBOARD — STATS GRID
+   ========================= */
+
+.dash-stats {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+}
+
+.dash-stat {
+    padding: 8px 10px;
+    background: rgba(255, 255, 255, 0.025);
+    border: 1px solid rgba(255, 255, 255, 0.04);
+    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.dash-stat-label {
+    font-size: 8px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: rgba(255, 255, 255, 0.3);
+    font-weight: 600;
+}
+
+.dash-stat-value {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.8);
+    font-weight: 500;
+}
+
+
+/* =========================
+   DASHBOARD — LIST
+   ========================= */
+
+.dash-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.dash-list li {
+    font-size: 12px;
+    line-height: 1.65;
+    color: rgba(255, 255, 255, 0.5);
+    padding: 5px 0 5px 16px;
+    position: relative;
+}
+
+.dash-list li::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 12px;
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.15);
+}
+
+
+/* =========================
+   DASHBOARD — MOONS
+   ========================= */
+
+.dash-moons {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.dash-moon {
+    padding: 10px 12px;
+    background: rgba(255, 255, 255, 0.025);
+    border: 1px solid rgba(255, 255, 255, 0.04);
+    border-radius: 8px;
+}
+
+.dash-moon-name {
+    font-size: 12px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.7);
+    margin: 0 0 4px 0;
+}
+
+.dash-moon-desc {
+    font-size: 12px;
+    line-height: 1.65;
+    color: rgba(255, 255, 255, 0.45);
+    margin: 0;
+}
+
+
+/* =========================
+   DASHBOARD — DISMISS
+   ========================= */
+
+.dash-dismiss {
+    margin-top: 24px;
+    padding-top: 16px;
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.25);
+    text-align: center;
+    letter-spacing: 0.5px;
+}
+
+.dash-dismiss kbd {
+    display: inline-block;
+    padding: 1px 5px;
+    margin: 0 2px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    font-family: inherit;
+    font-size: 10px;
+    color: rgba(255, 255, 255, 0.4);
+    line-height: 1.4;
+}
+
+
+/* =========================
+   KBD TAGS
+   ========================= */
+
+kbd {
+    display: inline-block;
+    padding: 1px 5px;
+    margin: 0 2px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    font-family: inherit;
+    font-size: 10px;
+    color: rgba(255, 255, 255, 0.5);
+    line-height: 1.4;
+}
+
+
+/* =========================
+   CONTROLS TOGGLE BUTTON
+   ========================= */
+
+#controls-toggle {
+    position: fixed;
+    top: 24px;
+    right: 24px;
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    background: rgba(10, 12, 30, 0.6);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 16px;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+    z-index: 60;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: auto;
+    transition: background 0.2s, color 0.2s;
+}
+
+#controls-toggle:hover {
+    background: rgba(10, 12, 30, 0.8);
+    color: rgba(255, 255, 255, 0.9);
+}
+
+
+/* =========================
+   CONTROLS PANEL
+   ========================= */
+
+#controls-panel {
+    position: fixed;
+    top: 70px;
+    right: 24px;
+    width: 260px;
+    z-index: 55;
+    pointer-events: auto;
+    opacity: 1;
+    transform: translateY(0);
+    transition: opacity 0.25s ease, transform 0.25s ease;
+}
+
+#controls-panel.hidden {
+    opacity: 0;
+    transform: translateY(-8px);
+    pointer-events: none;
+}
+
+#controls-panel-inner {
+    background: rgba(8, 10, 28, 0.75);
+    backdrop-filter: blur(20px) saturate(1.4);
+    -webkit-backdrop-filter: blur(20px) saturate(1.4);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    padding: 20px;
+    box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5);
+}
+
+.controls-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 16px;
+}
+
+.controls-title {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.7);
+}
+
+#controls-close {
+    width: 24px;
+    height: 24px;
+    border: none;
+    background: rgba(255, 255, 255, 0.06);
+    border-radius: 6px;
+    color: rgba(255, 255, 255, 0.4);
+    font-size: 16px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.2s, color 0.2s;
+}
+
+#controls-close:hover {
+    background: rgba(255, 80, 80, 0.15);
+    color: rgba(255, 100, 100, 0.9);
+}
+
+.controls-keys {
+    display: flex;
+    justify-content: center;
+    margin-bottom: 16px;
+}
+
+.key-group {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+}
+
+.key-row {
+    display: flex;
+    gap: 4px;
+}
+
+.controls-keys kbd {
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.6);
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+}
+
+.controls-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.controls-entry {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.controls-entry kbd {
+    min-width: 56px;
+    text-align: center;
+    font-size: 9px;
+    letter-spacing: 0.5px;
+}
+
+.controls-entry span {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.5);
+}
+
+@media (max-width: 480px) {
+    #controls-panel {
+        width: 220px;
+        right: 12px;
+        top: 60px;
+    }
+
+    #controls-panel-inner {
+        padding: 14px;
+    }
+
+    #controls-toggle {
+        right: 12px;
+        top: 12px;
+    }
+
+    #info-panel {
+        width: 100%;
+    }
+
+    #info-panel-inner {
+        padding: 24px 20px;
+    }
+
+    .dash-name {
+        font-size: 22px;
+    }
+
+    .dash-stats {
+        grid-template-columns: 1fr;
+    }
 }

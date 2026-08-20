@@ -1,10 +1,9 @@
 import * as THREE from "three";
-
-import { OrbitControls } from "three/addons/controls/OrbitControls.js";
-
 import { VRButton } from "three/addons/webxr/VRButton.js";
 
 import { createGargantuaBlackHole } from "./gargantuaBlackHole.js";
+import { createISSTracker } from "./issTracker.js";
+import { celestialHistory } from "./historyData.js";
 
 
 
@@ -50,7 +49,7 @@ renderer.outputColorSpace = THREE.SRGBColorSpace;
 
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 
-renderer.toneMappingExposure = 1.1;
+renderer.toneMappingExposure = 0.6;
 
 document.body.appendChild(renderer.domElement);
 
@@ -59,38 +58,248 @@ document.body.appendChild(renderer.domElement);
 
 
 
-const controls = new OrbitControls(
-    camera,
-    renderer.domElement
-);
+// ─── Input Manager (Unified Desktop + XR) ────────────────────────
 
-controls.enableDamping = true;
+const InputManager = {
+    // Movement (1 = active, 0 = inactive)
+    forward: 0,
+    backward: 0,
+    left: 0,
+    right: 0,
+    up: 0,
+    down: 0,
+    boost: 0,
 
-controls.dampingFactor = 0.05;
+    // Look (radians per frame, populated by mouse or XR)
+    lookX: 0,
+    lookY: 0,
 
-controls.minDistance = 8;
+    // Select action (triggered by click or XR trigger)
+    select: false,
 
-controls.maxDistance = 500;
+    // Pointer lock state
+    isLocked: false,
+    domElement: renderer.domElement,
+};
 
-controls.target.set(0, 0, 0);
+// ─── Pointer Lock (Desktop) ──────────────────────────────────────
+
+function requestPointerLock() {
+    if (!InputManager.isLocked) {
+        InputManager.domElement.requestPointerLock();
+    }
+}
+
+document.addEventListener("pointerlockchange", () => {
+    InputManager.isLocked =
+        document.pointerLockElement === InputManager.domElement;
+
+    const crosshair = document.getElementById("crosshair");
+    const hint = document.getElementById("pointer-lock-hint");
+
+    if (InputManager.isLocked) {
+        crosshair.classList.add("visible");
+        hint.classList.add("hidden");
+    } else {
+        crosshair.classList.remove("visible");
+        if (!infoPanel.classList.contains("visible")) {
+            hint.classList.remove("hidden");
+        }
+    }
+
+    const existingHistory = infoPanelInner.querySelector(".info-history");
+    if (InputManager.isLocked && currentInfoName && infoPanel.classList.contains("visible") && !existingHistory) {
+        const data = CELESTIAL_DATA[currentInfoName];
+        if (data) {
+            const historyDiv = document.createElement("div");
+            historyDiv.className = "info-history";
+            historyDiv.innerHTML = `<h3>History &amp; Discovery</h3><p>${data.history}</p>`;
+            const dismiss = infoPanelInner.querySelector(".info-dismiss");
+            if (dismiss) dismiss.before(historyDiv);
+        }
+    } else if (!InputManager.isLocked && existingHistory) {
+        existingHistory.remove();
+    }
+});
+
+// Mouse movement → look input
+document.addEventListener("mousemove", (event) => {
+    if (!InputManager.isLocked) return;
+
+    InputManager.lookX += event.movementX;
+    InputManager.lookY += event.movementY;
+});
+
+// Keyboard → movement state
+document.addEventListener("keydown", (event) => {
+    switch (event.code) {
+        case "KeyW":
+        case "ArrowUp":
+            InputManager.forward = 1;
+            break;
+        case "KeyS":
+        case "ArrowDown":
+            InputManager.backward = 1;
+            break;
+        case "KeyA":
+        case "ArrowLeft":
+            InputManager.left = 1;
+            break;
+        case "KeyD":
+        case "ArrowRight":
+            InputManager.right = 1;
+            break;
+        case "Space":
+            InputManager.up = 1;
+            event.preventDefault();
+            break;
+        case "ShiftLeft":
+        case "ShiftRight":
+            InputManager.down = 1;
+            break;
+        case "ControlLeft":
+        case "ControlRight":
+            break;
+        case "KeyX":
+            InputManager.boost = 1;
+            break;
+    }
+});
+
+document.addEventListener("keyup", (event) => {
+    switch (event.code) {
+        case "KeyW":
+        case "ArrowUp":
+            InputManager.forward = 0;
+            break;
+        case "KeyS":
+        case "ArrowDown":
+            InputManager.backward = 0;
+            break;
+        case "KeyA":
+        case "ArrowLeft":
+            InputManager.left = 0;
+            break;
+        case "KeyD":
+        case "ArrowRight":
+            InputManager.right = 0;
+            break;
+        case "Space":
+            InputManager.up = 0;
+            break;
+        case "ShiftLeft":
+        case "ShiftRight":
+            InputManager.down = 0;
+            break;
+        case "ControlLeft":
+        case "ControlRight":
+            break;
+        case "KeyX":
+            InputManager.boost = 0;
+            break;
+    }
+});
+
+// ─── Flying Controller (Acceleration + Damping) ──────────────────
+
+const FlyingController = {
+    enabled: true,
+
+    // Configurable parameters
+    moveSpeed: 35,
+    boostSpeed: 100,
+    acceleration: 6.0,
+    damping: 4.0,
+    lookSensitivity: 0.002,
+    maxVerticalLook: Math.PI / 2 - 0.01,
+
+    // Internal state
+    velocity: new THREE.Vector3(),
+    euler: new THREE.Euler(0, 0, 0, "YXZ"),
+    _targetVelocity: new THREE.Vector3(),
+    _forward: new THREE.Vector3(),
+    _right: new THREE.Vector3(),
+    _up: new THREE.Vector3(),
+
+    update(delta) {
+        if (!this.enabled) return;
+
+        // ── Apply look input ──
+        if (InputManager.lookX !== 0 || InputManager.lookY !== 0) {
+            this.euler.setFromQuaternion(camera.quaternion);
+
+            this.euler.y -= InputManager.lookX * this.lookSensitivity;
+            this.euler.x -= InputManager.lookY * this.lookSensitivity;
+
+            this.euler.x = Math.max(
+                -this.maxVerticalLook,
+                Math.min(this.maxVerticalLook, this.euler.x)
+            );
+
+            camera.quaternion.setFromEuler(this.euler);
+
+            InputManager.lookX = 0;
+            InputManager.lookY = 0;
+        }
+
+        // ── Compute desired velocity ──
+        this._forward.set(0, 0, -1).applyQuaternion(camera.quaternion);
+        this._right.set(1, 0, 0).applyQuaternion(camera.quaternion);
+        this._up.set(0, 1, 0).applyQuaternion(camera.quaternion);
+
+        this._targetVelocity.set(0, 0, 0);
+
+        if (InputManager.forward) this._targetVelocity.add(this._forward);
+        if (InputManager.backward) this._targetVelocity.sub(this._forward);
+        if (InputManager.right) this._targetVelocity.add(this._right);
+        if (InputManager.left) this._targetVelocity.sub(this._right);
+        if (InputManager.up) this._targetVelocity.add(this._up);
+        if (InputManager.down) this._targetVelocity.sub(this._up);
+
+        const hasInput = this._targetVelocity.lengthSq() > 0;
+
+        if (hasInput) {
+            this._targetVelocity.normalize();
+            const speed = InputManager.boost ? this.boostSpeed : this.moveSpeed;
+            this._targetVelocity.multiplyScalar(speed);
+        }
+
+        // ── Smooth acceleration / deceleration ──
+        const lerpFactor = hasInput
+            ? 1 - Math.exp(-this.acceleration * delta)
+            : 1 - Math.exp(-this.damping * delta);
+
+        this.velocity.lerp(this._targetVelocity, lerpFactor);
+
+        // ── Apply to camera position ──
+        camera.position.addScaledVector(this.velocity, delta);
+    },
+
+    // Check if user is actively providing movement input
+    hasMovementInput() {
+        return (
+            InputManager.forward ||
+            InputManager.backward ||
+            InputManager.left ||
+            InputManager.right ||
+            InputManager.up ||
+            InputManager.down
+        );
+    },
+
+    // Stop all movement (for transitions)
+    stopMovement() {
+        this.velocity.set(0, 0, 0);
+    },
+};
+
+
+// ─── WebXR Setup ────────────────────────────────────────────────
 
 renderer.xr.enabled = true;
 
-renderer.xr.addEventListener("sessionstart", () => {
-    controls.enabled = false;
-});
-
-renderer.xr.addEventListener("sessionend", () => {
-    controls.enabled = true;
-});
-
-document.body.appendChild(VRButton.createButton(renderer));
-
-
-
-
-
-
+// Add VR button for WebXR sessions
+const vrButton = VRButton.createButton(renderer);
 
 
 const SunSystem = new THREE.Group();
@@ -195,6 +404,8 @@ milkyWayTexture.anisotropy =
 
 scene.background = milkyWayTexture;
 
+scene.fog = new THREE.FogExp2(0x000008, 0.0018);
+
 
 
 
@@ -207,9 +418,9 @@ scene.background = milkyWayTexture;
 
 const SOLAR_LIGHT = {
     color: 0xfff4e0,
-    intensity: 12,
+    intensity: 30,
     distance: 0,
-    decay: 0.8
+    decay: 0.45
 };
 
 const sunLight = new THREE.PointLight(
@@ -228,7 +439,7 @@ SunSystem.add(sunLight);
 
 const ambientLight = new THREE.AmbientLight(
     0xffffff,
-    0.15
+    0.04
 );
 
 scene.add(ambientLight);
@@ -257,6 +468,8 @@ const sun = new THREE.Mesh(
         map: sunTexture
     })
 );
+
+sun.userData = { name: "Sun", type: "star" };
 
 SunSystem.add(sun);
 
@@ -811,7 +1024,7 @@ function roundedRectPath(ctx, x, y, w, h, r) {
 
 function createLabelTexture(text) {
 
-    const fontPx = 56;
+    const fontPx = 34;
 
     const font =
         `600 ${fontPx}px "Segoe UI", Arial, sans-serif`;
@@ -1061,7 +1274,8 @@ function createPlanet(data, parentGroup) {
 
     mesh.userData = {
         name: data.name,
-        distance: visualDistance
+        distance: visualDistance,
+        type: "planet"
     };
 
 
@@ -1234,6 +1448,25 @@ function createPlanet(data, parentGroup) {
 
             moonOrbit.add(moon);
 
+            const moonLabelBaseHeight =
+                THREE.MathUtils.clamp(
+                    moonData.radius * 0.5 + 0.2,
+                    0.3,
+                    0.5
+                );
+
+            const moonLabel =
+                createLabel(moonData.name, moonLabelBaseHeight);
+
+            moonLabel.position.set(
+                moonData.distance,
+                moonData.radius + moonLabelBaseHeight * 0.6,
+                0
+            );
+
+            moonOrbit.add(moonLabel);
+
+            registerLabel(moonLabel);
 
             moons.push({
                 orbit: moonOrbit,
@@ -1250,9 +1483,9 @@ function createPlanet(data, parentGroup) {
 
     const labelBaseHeight =
         THREE.MathUtils.clamp(
-            data.radius * 0.9 + 0.8,
-            1.3,
-            2.4
+            data.radius * 0.55 + 0.5,
+            0.8,
+            1.5
         );
 
     const label = createLabel(data.name, labelBaseHeight);
@@ -1806,11 +2039,11 @@ blackHoleSystem.group.scale.setScalar(BLACK_HOLE_CONFIG.scale);
 
 scene.add(blackHoleSystem.group);
 
-const blackHoleLabel = createLabel("BLACK HOLE", 3.5);
+const blackHoleLabel = createLabel("BLACK HOLE", 2.0);
 
 blackHoleLabel.position.set(
     0,
-    8.0,
+    5.5,
     0
 );
 
@@ -1826,17 +2059,485 @@ registerLabel(blackHoleLabel);
 
 
 
-const sunLabel = createLabel("Sun", 3.0);
+const sunLabel = createLabel("Sun", 1.8);
 
-sunLabel.position.set(0, SUN_RADIUS + 3.2, 0);
+sunLabel.position.set(0, SUN_RADIUS + 2.0, 0);
 
 SunSystem.add(sunLabel);
 
 registerLabel(sunLabel);
 
 
+// ─── Celestial Body Data ───────────────────────────────────────────
+
+const CELESTIAL_DATA = {
+    Sun: {
+        type: "Star",
+        category: "G-type Main-Sequence Star",
+        age: "4.6 billion years",
+        diameter: "1,391,000 km",
+        temperature: "5,500°C (surface)",
+        summary: "The Sun is the star at the center of our solar system. It is a nearly perfect ball of hot plasma, heated to incandescence by nuclear fusion reactions in its core, radiating energy as light, ultraviolet, and infrared radiation.",
+        history: "The Sun formed about 4.6 billion years ago from the gravitational collapse of a region within a large molecular cloud. Most of the matter gathered in the center, while the rest flattened into a protoplanetary disk. The Sun has been fusing hydrogen into helium for roughly half its main-sequence lifetime. In about 5 billion years, it will exhaust its hydrogen fuel, expand into a red giant, shed its outer layers, and eventually become a white dwarf."
+    },
+    Mercury: {
+        type: "Planet",
+        category: "Terrestrial Planet",
+        distanceFromSun: "57.9 million km",
+        orbitalPeriod: "88 days",
+        dayLength: "59 Earth days",
+        moons: 0,
+        summary: "Mercury is the smallest planet in the solar system and the closest to the Sun. Its orbit around the Sun takes 87.97 Earth days, the shortest of all the planets. It has no atmosphere and its surface is heavily cratered, resembling Earth's Moon.",
+        history: "Mercury has been known since at least 3000 BC. The Sumerians knew it as Nergal, the god of war. Galileo observed its phases in 1610, proving it orbited the Sun. NASA's Mariner 10 flew by Mercury in 1974-75, mapping about 45% of its surface. MESSENGER orbited from 2011-2015, revealing a surprisingly complex geological history, including evidence of past volcanic activity and a massive iron core that makes up 85% of the planet's radius."
+    },
+    Venus: {
+        type: "Planet",
+        category: "Terrestrial Planet",
+        distanceFromSun: "108.2 million km",
+        orbitalPeriod: "225 days",
+        dayLength: "243 Earth days (retrograde)",
+        moons: 0,
+        summary: "Venus is the second planet from the Sun. It is sometimes called Earth's 'sister planet' because of their similar size, mass, and proximity. However, Venus has a thick toxic atmosphere filled with carbon dioxide and clouds of sulfuric acid, with surface temperatures reaching 465°C — the hottest of any planet.",
+        history: "Venus was observed by Babylonian astronomers as early as 1600 BC. It was known as the morning and evening star. Galileo first observed its phases in 1610. The Soviet Venera missions (1961-1984) were the first to land on Venus, transmitting data from the surface for up to 120 minutes. The surface is dominated by volcanic features — over 1,600 major volcanoes — and vast basaltic plains. Venus rotates backwards compared to most planets, and a day on Venus is longer than its year."
+    },
+    Earth: {
+        type: "Planet",
+        category: "Terrestrial Planet",
+        distanceFromSun: "149.6 million km",
+        orbitalPeriod: "365.25 days",
+        dayLength: "24 hours",
+        moons: 1,
+        summary: "Earth is the third planet from the Sun and the only known celestial body to harbor life. About 71% of its surface is covered by water. It has a protective magnetic field and atmosphere that shield it from harmful solar radiation.",
+        history: "Earth formed approximately 4.54 billion years ago from the solar nebula. The Moon likely formed from debris after a Mars-sized body (Theia) collided with early Earth. Life appeared within the first billion years. The Great Oxidation Event 2.4 billion years ago transformed the atmosphere. Plate tectonics have shaped the surface continuously. Humans evolved in Africa about 300,000 years ago and have since developed complex civilizations across every continent."
+    },
+    Mars: {
+        type: "Planet",
+        category: "Terrestrial Planet",
+        distanceFromSun: "227.9 million km",
+        orbitalPeriod: "687 days",
+        dayLength: "24.6 hours",
+        moons: 2,
+        summary: "Mars is the fourth planet from the Sun, often called the 'Red Planet' due to iron oxide (rust) on its surface. It has the tallest volcano (Olympus Mons) and the deepest canyon (Valles Marineris) in the solar system.",
+        history: "Mars has been observed since ancient times. The Babylonians recorded its wandering motion. In 1877, Giovanni Schiaparelli mapped 'canali' (channels), which Percival Lowell interpreted as artificial canals, sparking speculation about Martian civilization. NASA's Viking 1 and 2 (1976) were the first successful Mars landers. The rover Spirit (2004-2010) and Opportunity (2004-2018) found evidence of ancient water. Curiosity (2011-present) and Perseverance (2021-present) are searching for signs of past microbial life and collecting samples for future return to Earth."
+    },
+    Jupiter: {
+        type: "Planet",
+        category: "Gas Giant",
+        distanceFromSun: "778.5 million km",
+        orbitalPeriod: "11.86 years",
+        dayLength: "9.93 hours",
+        moons: 95,
+        summary: "Jupiter is the largest planet in the solar system — more than twice as massive as all other planets combined. Its iconic Great Red Spot is a storm larger than Earth that has been raging for at least 350 years. Jupiter acts as a gravitational shield, deflecting asteroids away from the inner solar system.",
+        history: "Jupiter has been known since antiquity, named after the king of the Roman gods. Galileo discovered its four largest moons (Io, Europa, Ganymede, Callisto) in 1610, providing key evidence for the heliocentric model. Pioneer 10 (1973) and Voyager 1 & 2 (1979) revealed Jupiter's complex atmosphere and ring system. The Galileo orbiter (1995-2003) studied Jupiter for eight years and released a probe into its atmosphere. Juno (2016-present) is currently mapping Jupiter's interior structure, revealing that its core may be a 'fuzzy' mix of hydrogen and heavy elements rather than a solid ball."
+    },
+    Saturn: {
+        type: "Planet",
+        category: "Gas Giant",
+        distanceFromSun: "1.434 billion km",
+        orbitalPeriod: "29.46 years",
+        dayLength: "10.7 hours",
+        moons: 146,
+        summary: "Saturn is the sixth planet from the Sun, famous for its spectacular ring system made of ice and rock particles. It is the least dense planet — it could float in water. Saturn's rings extend up to 282,000 km from the planet but are only about 10 meters thick.",
+        history: "Saturn was known to the ancients — the Babylonians identified it around the 7th century BC. Galileo observed its rings in 1610 but couldn't resolve them. Christiaan Huygens correctly identified them as a ring in 1655. Cassini discovered the division between the rings in 1675. Voyager 1 & 2 (1980-81) revealed detailed ring structure. The Cassini-Huygens mission (2004-2017) was one of humanity's greatest achievements: it orbited Saturn for 13 years, discovered geysers on Enceladus, a subsurface ocean on Titan, and revealed the complex dynamics of the ring system before deliberately plunging into Saturn's atmosphere."
+    },
+    Uranus: {
+        type: "Planet",
+        category: "Ice Giant",
+        distanceFromSun: "2.871 billion km",
+        orbitalPeriod: "84 years",
+        dayLength: "17.2 hours",
+        moons: 28,
+        summary: "Uranus is the seventh planet from the Sun and the first discovered with a telescope. It rotates on its side with an axial tilt of 98°, likely due to a massive ancient collision. Its atmosphere contains methane, giving it a distinctive blue-green color.",
+        history: "William Herschel discovered Uranus on March 13, 1781, making it the first planet found using a telescope. It was originally named 'Georgium Sidus' after King George III before being renamed after the Greek sky god. Voyager 2 flyby in 1986 revealed a relatively featureless atmosphere and 11 known rings. Recent observations from Hubble and ground-based telescopes have revealed more atmospheric dynamics, including massive storms. Uranus has 27 known moons, all named after characters from Shakespeare and Alexander Pope."
+    },
+    Neptune: {
+        type: "Planet",
+        category: "Ice Giant",
+        distanceFromSun: "4.495 billion km",
+        orbitalPeriod: "165 years",
+        dayLength: "16.1 hours",
+        moons: 16,
+        summary: "Neptune is the eighth and farthest known planet from the Sun. It has the strongest winds in the solar system, reaching speeds of 2,100 km/h. Neptune's vivid blue color comes from methane in its atmosphere absorbing red light.",
+        history: "Neptune was the first planet found through mathematical prediction rather than direct observation. Urbain Le Verrier and John Couch Adams independently predicted its position in 1846 based on irregularities in Uranus's orbit. Johann Galle observed it at the predicted location on September 23, 1846. Voyager 2's flyby in 1989 revealed the Great Dark Spot (a storm since disappeared), bright cloud features, and geysers on its moon Triton — the first active geysers seen beyond Earth. Triton orbits retrograde, suggesting it was a Kuiper Belt object captured by Neptune's gravity."
+    },
+    Ceres: {
+        type: "Dwarf Planet",
+        category: "Dwarf Planet (Asteroid Belt)",
+        distanceFromSun: "413.7 million km",
+        diameter: "946 km",
+        summary: "Ceres is the largest object in the asteroid belt between Mars and Jupiter and the only dwarf planet in the inner solar system. NASA's Dawn spacecraft revealed bright spots of sodium carbonate on its surface, indicating recent geological activity.",
+        history: "Ceres was discovered by Giuseppe Piazzi on January 1, 1801. It was initially classified as a planet, then reclassified as an asteroid, and finally as a dwarf planet in 2006. Dawn orbited Ceres from 2015-2018, revealing the mysterious bright spots in Occator Crater, which are deposits of sodium carbonate — minerals that suggest a subsurface ocean may still exist. Ceres may have formed at the same time as the other planets but was prevented from growing larger by Jupiter's gravitational influence."
+    },
+    Pluto: {
+        type: "Dwarf Planet",
+        category: "Dwarf Planet (Kuiper Belt)",
+        distanceFromSun: "5.906 billion km",
+        diameter: "2,377 km",
+        summary: "Pluto is the most famous dwarf planet, reclassified from planet status in 2006. It has a heart-shaped nitrogen glacier (Tombaugh Regio) and a thin atmosphere that freezes and collapses as it moves farther from the Sun in its elliptical orbit.",
+        history: "Pluto was discovered by Clyde Tombaugh on February 18, 1930, at Lowell Observatory. It was classified as the ninth planet until 2006, when the International Astronomical Union reclassified it as a dwarf planet. NASA's New Horizons flew by Pluto on July 14, 2015, revealing stunning terrain including towering ice mountains, a heart-shaped plain, and a thin blue atmosphere. Data from New Horizons showed Pluto has five known moons, with Charon so large that the Pluto-Charon system is sometimes considered a double dwarf planet."
+    },
+    Haumea: {
+        type: "Dwarf Planet",
+        category: "Dwarf Planet (Kuiper Belt)",
+        distanceFromSun: "6.45 billion km",
+        diameter: "1,632 × 1,048 km",
+        summary: "Haumea is an egg-shaped dwarf planet in the Kuiper Belt, elongated by its rapid rotation (one day lasts only 4 hours). It has two moons and a ring — the first ring discovered around a Kuiper Belt object.",
+        history: "Haumea was discovered in 2004 by a team led by Mike Brown at Caltech, though the Spanish team of José Luis Ortiz claimed discovery shortly after, leading to a controversy. It was named after the Hawaiian goddess of fertility. Haumea's extreme shape is caused by its fast spin — it completes a rotation in just 3.9 hours, making it one of the fastest-rotating large objects in the solar system. In 2017, stellar occultation observations confirmed a ring around Haumea, making it the first known ring system around a TNO."
+    },
+    Makemake: {
+        type: "Dwarf Planet",
+        category: "Dwarf Planet (Kuiper Belt)",
+        distanceFromSun: "6.85 billion km",
+        diameter: "1,430 km",
+        summary: "Makemake is the second-brightest Kuiper Belt object after Pluto and the third-largest known dwarf planet. Its surface is covered in methane, ethane, and possibly nitrogen ices.",
+        history: "Makemake was discovered on March 31, 2005 by Mike Brown's team at Palomar Observatory. It was initially designated 2005 FY9 and given the nickname 'Easterbunny' due to its discovery date near Easter. It was officially named after the creation god of the Rapa Nui (Easter Island) people. Makemake has one known moon, MK2 (nicknamed 'Moonikin'), discovered in 2016 via the Hubble Space Telescope. The discovery of MK2 allowed astronomers to better determine Makemake's mass and density."
+    },
+    Eris: {
+        type: "Dwarf Planet",
+        category: "Dwarf Planet (Scattered Disc)",
+        distanceFromSun: "10.12 billion km",
+        diameter: "2,326 km",
+        summary: "Eris is the most massive known dwarf planet, slightly more massive than Pluto. Its discovery directly led to the reclassification of Pluto and the creation of the 'dwarf planet' category in 2006.",
+        history: "Eris was discovered on January 5, 2005 by Mike Brown's team at Palomar Observatory. It was initially called 'the tenth planet' until its mass was measured, showing it was actually more massive than Pluto. This discovery forced the IAU to formally define 'planet' for the first time, resulting in Pluto's reclassification. Eris was named after the Greek goddess of discord and strife. Its moon Dysnomia was discovered in 2005, and its orbit was used to calculate Eris's mass. Eris takes 557 years to complete one orbit around the Sun."
+    },
+    "BLACK HOLE": {
+        type: "Supermassive Black Hole",
+        category: "Gargantua (Fictional / Interstellar-inspired)",
+        mass: "~100 million solar masses (estimated)",
+        eventHorizonDiameter: "~600 million km",
+        summary: "This is a supermassive black hole inspired by the fictional Gargantua from the film Interstellar. In reality, supermassive black holes sit at the centers of most galaxies, including our own Milky Way (Sagittarius A*, ~4 million solar masses).",
+        history: "Black holes were first predicted by Einstein's General Theory of Relativity (1915). Karl Schwarzschild derived the first exact solution in 1916, describing the event horizon. The term 'black hole' was popularized by John Wheeler in 1967. Cygnus X-1, discovered in 1964, was the first strong black hole candidate. In 2019, the Event Horizon Telescope captured the first-ever image of a black hole — the supermassive black hole at the center of galaxy M87. In 2022, they released an image of Sagittarius A*, the black hole at the center of our own Milky Way. Stephen Hawking showed that black holes emit radiation (Hawking radiation) and can eventually evaporate over immense timescales."
+    },
+    "ISS": {
+        type: "Satellite",
+        category: "International Space Station",
+        orbiting: "Earth",
+        altitude: "~420 km",
+        orbitalPeriod: "~92 minutes",
+        speed: "~27,600 km/h",
+        summary: "The International Space Station is a modular space station in low Earth orbit. It is a multinational collaborative project involving NASA, Roscosmos, JAXA, ESA, and CSA. The ISS orbits Earth every 90 minutes at about 420 km altitude.",
+        history: "The ISS was first launched in 1998 and has been continuously inhabited since November 2000. It serves as a microgravity and space environment research laboratory where scientific research is conducted in astrobiology, astronomy, meteorology, physics, and other fields. The station can be seen from Earth with the naked eye and is one of the brightest artificial objects in the sky."
+    }
+};
 
 
+// ─── Raycaster + Interactive Objects Registry ────────────────────
+
+const raycaster = new THREE.Raycaster();
+raycaster.far = 500;
+
+const interactiveObjects = [];
+
+function walkUpToObject(object) {
+    let current = object;
+    while (current) {
+        if (current.userData && current.userData.interactive) {
+            return current;
+        }
+        current = current.parent;
+    }
+    return null;
+}
+
+function registerInteractiveObject(mesh, meta) {
+    mesh.userData.interactive = true;
+    mesh.userData.celestialName = meta.name;
+    mesh.userData.celestialType = meta.type;
+    mesh.userData.celestialRadius = meta.radius || 1;
+    interactiveObjects.push(mesh);
+}
+
+// Register planets
+for (const planet of planets) {
+    registerInteractiveObject(planet.mesh, {
+        name: planet.data.name,
+        type: "planet",
+        radius: planet.data.radius
+    });
+}
+
+// Register sun
+registerInteractiveObject(sun, {
+    name: "Sun",
+    type: "star",
+    radius: SUN_RADIUS
+});
+
+// Black hole click target (invisible sphere)
+const bhClickTarget = new THREE.Mesh(
+    new THREE.SphereGeometry(4, 16, 16),
+    new THREE.MeshBasicMaterial({ visible: false })
+);
+bhClickTarget.userData = { name: "BLACK HOLE", type: "blackhole" };
+blackHoleSystem.group.add(bhClickTarget);
+registerInteractiveObject(bhClickTarget, {
+    name: "BLACK HOLE",
+    type: "blackhole",
+    radius: 5.5
+});
+
+// Register dwarf planets
+for (const dwarf of dwarfPlanets) {
+    registerInteractiveObject(dwarf.mesh, {
+        name: dwarf.data.name,
+        type: "dwarf",
+        radius: dwarf.data.radius
+    });
+}
+
+// ─── Crosshair Raycaster ────────────────────────────────────────
+
+const CrosshairRaycaster = {
+    currentTarget: null,
+    currentTargetMesh: null,
+    _direction: new THREE.Vector3(),
+    _origin: new THREE.Vector3(),
+
+    update() {
+        camera.getWorldDirection(this._direction);
+        this._origin.copy(camera.position);
+
+        raycaster.set(this._origin, this._direction);
+        const intersects = raycaster.intersectObjects(interactiveObjects, false);
+
+        const nameEl = document.getElementById("crosshair-name");
+        const crosshairEl = document.getElementById("crosshair");
+
+        if (intersects.length > 0) {
+            const hit = intersects[0].object;
+            const name = hit.userData.celestialName;
+
+            if (this.currentTarget !== name) {
+                this.currentTarget = name;
+                this.currentTargetMesh = hit;
+
+                crosshairEl.classList.add("targeting");
+                if (nameEl) {
+                    nameEl.textContent = name;
+                    nameEl.classList.add("visible");
+                }
+            }
+        } else {
+            if (this.currentTarget !== null) {
+                this.currentTarget = null;
+                this.currentTargetMesh = null;
+                crosshairEl.classList.remove("targeting");
+                if (nameEl) {
+                    nameEl.classList.remove("visible");
+                }
+            }
+        }
+    },
+
+    getTargetInfo() {
+        if (!this.currentTargetMesh) return null;
+        const mesh = this.currentTargetMesh;
+        const worldPos = new THREE.Vector3();
+        mesh.getWorldPosition(worldPos);
+        return {
+            name: mesh.userData.celestialName,
+            type: mesh.userData.celestialType,
+            radius: mesh.userData.celestialRadius,
+            worldPos: worldPos,
+            mesh: mesh
+        };
+    }
+};
+
+
+// ─── Camera Fly-To System ───────────────────────────────────────
+
+const flyTo = {
+    active: false,
+    startPos: new THREE.Vector3(),
+    endPos: new THREE.Vector3(),
+    startLook: new THREE.Vector3(),
+    endLook: new THREE.Vector3(),
+    progress: 0,
+    duration: 2.5,
+    targetName: null,
+    onComplete: null,
+
+    following: false,
+    followMesh: null,
+    followOffset: new THREE.Vector3(),
+    followLookOffset: new THREE.Vector3()
+};
+
+function startFlyTo(bodyName, worldPos, bodyRadius, hitMesh) {
+    flyTo.active = true;
+    flyTo.progress = 0;
+    flyTo.targetName = bodyName;
+    flyTo.following = false;
+    flyTo.startPos.copy(camera.position);
+    flyTo.startLook.copy(
+        camera.position.clone().add(
+            new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion)
+        )
+    );
+
+    // Safe viewing distance: scales with object size
+    const viewDist = Math.max(bodyRadius * 4, 8);
+    const dir = camera.position.clone().sub(worldPos).normalize();
+    flyTo.endPos.copy(worldPos).add(dir.multiplyScalar(viewDist));
+    flyTo.endLook.copy(worldPos);
+
+    flyTo.followMesh = hitMesh;
+    flyTo.followOffset.copy(flyTo.endPos).sub(worldPos);
+    flyTo.followLookOffset.copy(flyTo.endLook).sub(worldPos);
+
+    FlyingController.stopMovement();
+    FlyingController.enabled = false;
+    document.exitPointerLock();
+}
+
+function stopFollow() {
+    flyTo.following = false;
+    flyTo.followMesh = null;
+}
+
+function breakFollow() {
+    if (flyTo.following) {
+        stopFollow();
+        FlyingController.enabled = true;
+    }
+}
+
+// ─── Click Handler (Crosshair-Based Selection) ──────────────────
+
+renderer.domElement.addEventListener("click", (event) => {
+    if (flyTo.active) return;
+
+    // First click: request pointer lock
+    if (!InputManager.isLocked) {
+        requestPointerLock();
+        return;
+    }
+
+    const target = CrosshairRaycaster.getTargetInfo();
+    if (!target) return;
+
+    startFlyTo(target.name, target.worldPos, target.radius, target.mesh);
+
+    // Show info panel immediately on selection
+    showInfoPanel(target.name);
+
+    flyTo.onComplete = () => {
+        flyTo.following = true;
+    };
+});
+
+const infoPanel = document.getElementById("info-panel");
+const infoPanelInner = document.getElementById("info-panel-inner");
+let currentInfoName = null;
+
+function showInfoPanel(name) {
+    const data = CELESTIAL_DATA[name];
+    const history = celestialHistory[name];
+    if (!data && !history) return;
+    currentInfoName = name;
+
+    const h = history || {};
+    const typeLabel = h.type || data.type || "";
+    const tagline = h.tagline || "";
+    const description = h.description || data.summary || "";
+
+    const typeColors = {
+        "Star": "#FDB813",
+        "Terrestrial Planet": "#4FC3F7",
+        "Gas Giant": "#FF8A65",
+        "Ice Giant": "#80DEEA",
+        "Dwarf Planet": "#CE93D8",
+        "Supermassive Black Hole": "#EF5350",
+        "Satellite": "#81D4FA"
+    };
+    const accentColor = typeColors[typeLabel] || "#ffffff";
+
+    const facts = h.quickFacts || {};
+    const factsHTML = Object.entries(facts).map(([k, v]) =>
+        `<div class="dash-stat"><span class="dash-stat-label">${k}</span><span class="dash-stat-value">${v}</span></div>`
+    ).join("");
+
+    const didYouKnow = h.didYouKnow || [];
+    const didYouKnowHTML = didYouKnow.map(f =>
+        `<li>${f}</li>`
+    ).join("");
+
+    const moons = h.moons || [];
+    const moonsHTML = moons.map(m =>
+        `<div class="dash-moon"><h4 class="dash-moon-name">${m.name}</h4><p class="dash-moon-desc">${m.description}</p></div>`
+    ).join("");
+
+    infoPanelInner.innerHTML = `
+        <button id="info-close">&times;</button>
+        <div class="dash-header">
+            <span class="dash-type" style="border-color:${accentColor}; color:${accentColor}">${typeLabel}</span>
+            <h2 class="dash-name">${h.name || name}</h2>
+            <p class="dash-tagline">${tagline}</p>
+        </div>
+        <p class="dash-description">${description}</p>
+        ${factsHTML ? `<div class="dash-section"><h3 class="dash-section-title">Quick Facts</h3><div class="dash-stats">${factsHTML}</div></div>` : ""}
+        ${moonsHTML ? `<div class="dash-section"><h3 class="dash-section-title">Moons</h3><div class="dash-moons">${moonsHTML}</div></div>` : ""}
+        ${h.discover ? `<div class="dash-section"><h3 class="dash-section-title">Discover</h3><p class="dash-body">${h.discover}</p></div>` : ""}
+        ${h.history ? `<div class="dash-section"><h3 class="dash-section-title">History &amp; Discovery</h3><p class="dash-body">${h.history}</p></div>` : ""}
+        ${h.special ? `<div class="dash-section"><h3 class="dash-section-title">What Makes It Special</h3><p class="dash-body">${h.special}</p></div>` : ""}
+        ${h.exploration ? `<div class="dash-section"><h3 class="dash-section-title">Exploration</h3><p class="dash-body">${h.exploration}</p></div>` : ""}
+        ${didYouKnowHTML ? `<div class="dash-section"><h3 class="dash-section-title">Did You Know?</h3><ul class="dash-list">${didYouKnowHTML}</ul></div>` : ""}
+        <div class="dash-dismiss">Press <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> to continue exploring</div>
+    `;
+
+    infoPanel.classList.add("visible");
+
+    document.getElementById("pointer-lock-hint").classList.add("hidden");
+
+    document.getElementById("info-close").addEventListener("click", closeInfoPanel);
+}
+
+function closeInfoPanel() {
+    infoPanel.classList.remove("visible");
+    currentInfoName = null;
+    breakFollow();
+
+    if (!InputManager.isLocked) {
+        document.getElementById("pointer-lock-hint").classList.remove("hidden");
+    }
+}
+
+
+// ─── Hover Highlight (Crosshair-Based) ──────────────────────────
+
+const hoverHighlight = {
+    current: null,
+    originalColor: null
+};
+
+function updateHoverHighlight() {
+    if (flyTo.active) return;
+
+    // Reset previous highlight
+    if (hoverHighlight.current && hoverHighlight.current.material && hoverHighlight.current.material.emissive) {
+        hoverHighlight.current.material.emissive.setHex(hoverHighlight.originalColor || 0x000000);
+    }
+
+    const target = CrosshairRaycaster.getTargetInfo();
+    if (target && target.mesh && target.mesh.material && target.mesh.material.emissive) {
+        hoverHighlight.originalColor = target.mesh.material.emissive.getHex();
+        target.mesh.material.emissive.setHex(0x222244);
+        hoverHighlight.current = target.mesh;
+    } else {
+        hoverHighlight.current = null;
+    }
+}
+
+
+// ─── ISS Tracker ────────────────────────────────────────────────
+
+const earthPlanet = planets.find(p => p.data.name === "Earth");
+const issTracker = createISSTracker(scene, earthPlanet, camera);
+if (issTracker.marker) {
+    interactiveObjects.push(issTracker.marker);
+}
+issTracker.start();
 
 
 const clock =
@@ -1850,6 +2551,38 @@ function animate() {
     const delta = clock.getDelta();
 
     const elapsed = clock.elapsedTime;
+
+    // ── XR Controller Input (when in XR session) ──
+    if (renderer.xr.isPresenting) {
+        const session = renderer.xr.getSession();
+        if (session) {
+            for (const source of session.inputSources) {
+                if (source.gamepad) {
+                    const gp = source.gamepad;
+                    const thumbstickX = gp.axes[2] || 0;
+                    const thumbstickY = gp.axes[3] || 0;
+                    const leftX = gp.axes[0] || 0;
+                    const leftY = gp.axes[1] || 0;
+
+                    if (source.handedness === "left") {
+                        InputManager.forward = leftY < -0.1 ? 1 : 0;
+                        InputManager.backward = leftY > 0.1 ? 1 : 0;
+                        InputManager.left = leftX < -0.1 ? 1 : 0;
+                        InputManager.right = leftX > 0.1 ? 1 : 0;
+                    }
+
+                    if (source.handedness === "right") {
+                        InputManager.lookX = thumbstickX * 200;
+                        InputManager.lookY = thumbstickY * 200;
+
+                        if (gp.buttons[0] && gp.buttons[0].pressed) {
+                            InputManager.select = true;
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     // Update black hole shader time uniforms
     if (blackHoleSystem.group.userData.uniforms) {
@@ -1936,7 +2669,53 @@ function animate() {
     
     
 
-    controls.update();
+    // Fly-to camera animation
+    if (flyTo.active) {
+        flyTo.progress += delta / flyTo.duration;
+        const t = THREE.MathUtils.smoothstep(flyTo.progress, 0, 1);
+
+        camera.position.lerpVectors(flyTo.startPos, flyTo.endPos, t);
+
+        const lookTarget = new THREE.Vector3().lerpVectors(flyTo.startLook, flyTo.endLook, t);
+        camera.lookAt(lookTarget);
+
+        if (flyTo.progress >= 1) {
+            flyTo.active = false;
+            FlyingController.enabled = true;
+            camera.lookAt(flyTo.endLook);
+
+            if (flyTo.onComplete) {
+                flyTo.onComplete();
+                flyTo.onComplete = null;
+            }
+        }
+    }
+
+    // Follow mode — camera tracks the planet as it orbits
+    if (flyTo.following && flyTo.followMesh) {
+        // Break follow if user inputs movement
+        if (FlyingController.hasMovementInput()) {
+            breakFollow();
+        } else {
+            const targetWorldPos = new THREE.Vector3();
+            flyTo.followMesh.getWorldPosition(targetWorldPos);
+
+            const desiredPos = targetWorldPos.clone().add(flyTo.followOffset);
+            camera.position.lerp(desiredPos, 4.0 * delta);
+
+            const lookTarget = targetWorldPos.clone().add(flyTo.followLookOffset);
+            camera.lookAt(lookTarget);
+        }
+    }
+
+    // Crosshair raycasting + hover highlight
+    CrosshairRaycaster.update();
+    updateHoverHighlight();
+
+    // ISS tracker update
+    issTracker.update(delta);
+
+    FlyingController.update(flyTo.active ? 0 : delta);
 
     renderer.render(scene, camera);
 }
@@ -1968,8 +2747,21 @@ window.addEventListener(
 );
 
 
+// ─── Controls Panel Toggle ──────────────────────────────────────
 
+const controlsToggle = document.getElementById("controls-toggle");
+const controlsPanel = document.getElementById("controls-panel");
+const controlsClose = document.getElementById("controls-close");
 
+controlsToggle.addEventListener("click", (e) => {
+    e.stopPropagation();
+    controlsPanel.classList.toggle("hidden");
+});
+
+controlsClose.addEventListener("click", (e) => {
+    e.stopPropagation();
+    controlsPanel.classList.add("hidden");
+});
 
 
 renderer.setAnimationLoop(animate);
